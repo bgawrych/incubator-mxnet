@@ -1,5 +1,3 @@
-#!/usr/bin/env bash
-
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
@@ -17,16 +15,10 @@
 # specific language governing permissions and limitations
 # under the License.
 
-# build and install are separated so changes to build don't invalidate
-# the whole docker cache for the image
+all: pass_lib
 
-set -ex
+pass_lib:
+	g++ -shared -fPIC -std=c++11 pass_lib.cc -o libpass_lib.so -I ../../../include/mxnet
 
- # Python 2.7 is installed by default, install 3.6 on top
-yum -y install https://centos7.iuscommunity.org/ius-release.rpm
-yum -y install python36u
-
-# Install PIP
-curl "https://bootstrap.pypa.io/get-pip.py" -o "get-pip.py"
-python3.6 get-pip.py
-pip3 install nose pylint numpy nose-timer requests h5py scipy==1.2.3
+clean:
+	rm -rf libpass_lib.so
