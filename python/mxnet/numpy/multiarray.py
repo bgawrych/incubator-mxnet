@@ -29,6 +29,7 @@ except ImportError:
     from builtins import slice as py_slice
 
 from array import array as native_array
+import functools
 import ctypes
 import warnings
 import numpy as _np
@@ -63,7 +64,7 @@ __all__ = ['ndarray', 'empty', 'empty_like', 'array', 'shape', 'median',
            'sort', 'tensordot', 'eye', 'linspace', 'logspace', 'expand_dims', 'tile', 'arange',
            'array_split', 'split', 'hsplit', 'vsplit', 'dsplit', 'flatnonzero', 'tril_indices',
            'concatenate', 'stack', 'vstack', 'row_stack', 'column_stack', 'hstack', 'dstack',
-           'average', 'mean', 'maximum', 'fmax', 'minimum', 'fmin',
+           'average', 'mean', 'maximum', 'fmax', 'minimum', 'fmin', 'amax', 'amin', 'max', 'min',
            'swapaxes', 'clip', 'argmax', 'argmin', 'std', 'var', 'insert',
            'indices', 'copysign', 'ravel', 'unravel_index', 'diag_indices_from', 'hanning', 'hamming', 'blackman',
            'logical_and', 'logical_or', 'logical_xor',
@@ -203,6 +204,26 @@ _NUMPY_ARRAY_UFUNC_DICT = {}
 _FALLBACK_ARRAY_FUNCTION_WARNED_RECORD = {}
 _FALLBACK_ARRAY_UFUNC_WARNED_RECORD = {}
 
+def wrap_mxnp_np_ufunc(func):
+    """
+    A convenience decorator for wrapping for python overload-able ops to provide type
+    casting for mixed use of mx_np and onp inputs.
+
+    Parameters
+    ----------
+    func : a python overload-able binary function to be wrapped for type casting.
+
+    Returns
+    -------
+    Function
+        A function wrapped with type casted.
+    """
+    @functools.wraps(func)
+    def _wrap_mxnp_np_ufunc(x1, x2):
+        if isinstance(x2, _np.ndarray):
+            x2 = _as_mx_np_array(x2, ctx=x1.ctx)
+        return func(x1, x2)
+    return _wrap_mxnp_np_ufunc
 
 @set_module('mxnet.numpy')  # pylint: disable=invalid-name
 class ndarray(NDArray):
@@ -256,7 +277,17 @@ class ndarray(NDArray):
         Dispatch official NumPy unary/binary operator calls on mxnet.numpy.ndarray
         to this function. The operators must comply with the ufunc definition in NumPy.
         The following code is adapted from CuPy.
+        Casting rules for operator with mx_np and onp (inplace op will keep its type)
+        | Expression | a type | b type | out type|
+        | --- | --- | --- | --- |
+        | `a += b` | onp | mx_np | onp |
+        | `a += b` | mx_np | onp | mx_np |
+        | `c = a + b` | onp | mx_np | mx_np |
+        | `c = a + b` | mx_np | onp | mx_np |
         """
+        ufunc_list = ["add", "subtract", "multiply", "divide", "true_divide", "floor_divide", "power",
+                      "remainder", "bitwise_and", "bitwise_or", "bitwise_xor", "left_shift", "right_shift",
+                      "greater", "greater_equal", "less", "less_equal", "not_equal", "equal", "matmul"]
         if 'out' in kwargs:
             # need to unfold tuple argument in kwargs
             out = kwargs['out']
@@ -267,13 +298,13 @@ class ndarray(NDArray):
         if method == '__call__':
             name = ufunc.__name__
             mx_ufunc = _NUMPY_ARRAY_UFUNC_DICT.get(name, None)
+            onp_op = _get_np_op(name)
             if mx_ufunc is None:
                 # try to fallback to official NumPy op
                 if is_recording():
                     raise ValueError("Falling back to NumPy operator {} with autograd active is not supported."
                                      "Please consider moving the operator to the outside of the autograd scope.")\
                                      .format(name)
-                onp_op = _get_np_op(name)
                 new_inputs = [arg.asnumpy() if isinstance(arg, ndarray) else arg for arg in inputs]
                 if onp_op not in _FALLBACK_ARRAY_UFUNC_WARNED_RECORD:
                     import logging
@@ -282,6 +313,16 @@ class ndarray(NDArray):
                     _FALLBACK_ARRAY_UFUNC_WARNED_RECORD[onp_op] = True
                 out = onp_op(*new_inputs, **kwargs)
                 return _as_mx_np_array(out, ctx=inputs[0].ctx)
+            # ops with np mx_np
+            elif name in ufunc_list and isinstance(inputs[0], _np.ndarray):
+                # inplace
+                if 'out' in kwargs:
+                    new_inputs = [arg.asnumpy() if isinstance(arg, ndarray) else arg for arg in inputs]
+                    return onp_op(*new_inputs, **kwargs)
+                else:
+                    new_inputs = [_as_mx_np_array(arg, ctx=inputs[1].ctx)
+                                  if isinstance(arg, _np.ndarray) else arg for arg in inputs]
+                    return mx_ufunc(*new_inputs, **kwargs)
             else:
                 return mx_ufunc(*inputs, **kwargs)
         else:
@@ -854,10 +895,12 @@ class ndarray(NDArray):
                 value_nd = value_nd.broadcast_to(bcast_shape)
         return value_nd
 
+    @wrap_mxnp_np_ufunc
     def __add__(self, other):
         """x.__add__(y) <=> x + y"""
         return add(self, other)
 
+    @wrap_mxnp_np_ufunc
     def __iadd__(self, other):
         """x.__iadd__(y) <=> x += y"""
         if not self.writable:
@@ -868,26 +911,32 @@ class ndarray(NDArray):
         """x.__invert__() <=> ~x"""
         return invert(self)
 
+    @wrap_mxnp_np_ufunc
     def __and__(self, other):
         """x.__and__(y) <=> x & y"""
         return bitwise_and(self, other)
 
+    @wrap_mxnp_np_ufunc
     def __or__(self, other):
         """x.__or__(y) <=> x | y"""
         return bitwise_or(self, other)
 
+    @wrap_mxnp_np_ufunc
     def __xor__(self, other):
         """x.__xor__(y) <=> x ^ y"""
         return bitwise_xor(self, other)
 
+    @wrap_mxnp_np_ufunc
     def __iand__(self, other):
         """x.__iand__(y) <=> x &= y"""
         return bitwise_and(self, other, out=self)
 
+    @wrap_mxnp_np_ufunc
     def __ior__(self, other):
         """x.__ior__(y) <=> x |= y"""
         return bitwise_or(self, other, out=self)
 
+    @wrap_mxnp_np_ufunc
     def __ixor__(self, other):
         """x.__ixor__(y) <=> x ^= y"""
         return bitwise_xor(self, other, out=self)
@@ -912,20 +961,24 @@ class ndarray(NDArray):
         """x.__trunc__()"""
         return trunc(self)
 
+    @wrap_mxnp_np_ufunc
     def __sub__(self, other):
         """x.__sub__(y) <=> x - y"""
         return subtract(self, other)
 
+    @wrap_mxnp_np_ufunc
     def __isub__(self, other):
         """x.__isub__(y) <=> x -= y"""
         if not self.writable:
             raise ValueError('trying to subtract from a readonly ndarray')
         return subtract(self, other, out=self)
 
+    @wrap_mxnp_np_ufunc
     def __rsub__(self, other):
         """x.__rsub__(y) <=> y - x"""
         return subtract(other, self)
 
+    @wrap_mxnp_np_ufunc
     def __mul__(self, other):
         """x.__mul__(y) <=> x * y"""
         return multiply(self, other)
@@ -933,60 +986,74 @@ class ndarray(NDArray):
     def __neg__(self):
         return self.__mul__(-1.0)
 
+    @wrap_mxnp_np_ufunc
     def __imul__(self, other):
         """x.__imul__(y) <=> x *= y"""
         if not self.writable:
             raise ValueError('trying to add to a readonly ndarray')
         return multiply(self, other, out=self)
 
+    @wrap_mxnp_np_ufunc
     def __rmul__(self, other):
         """x.__rmul__(y) <=> y * x"""
         return self.__mul__(other)
 
+    @wrap_mxnp_np_ufunc
     def __div__(self, other):
         """x.__div__(y) <=> x / y"""
         return divide(self, other)
 
+    @wrap_mxnp_np_ufunc
     def __rdiv__(self, other):
         """x.__rdiv__(y) <=> y / x"""
         return divide(other, self)
 
+    @wrap_mxnp_np_ufunc
     def __idiv__(self, other):
         """x.__idiv__(y) <=> x /= y"""
         return divide(self, other, out=self)
 
+    @wrap_mxnp_np_ufunc
     def __truediv__(self, other):
         """x.__truediv__(y) <=> x / y"""
         return divide(self, other)
 
+    @wrap_mxnp_np_ufunc
     def __rtruediv__(self, other):
         """x.__rtruediv__(y) <=> y / x"""
         return divide(other, self)
 
+    @wrap_mxnp_np_ufunc
     def __itruediv__(self, other):
         """x.__itruediv__(y) <=> x /= y"""
         return divide(self, other, out=self)
 
+    @wrap_mxnp_np_ufunc
     def __mod__(self, other):
         """x.__mod__(y) <=> x % y"""
         return mod(self, other)
 
+    @wrap_mxnp_np_ufunc
     def __rmod__(self, other):
         """x.__rmod__(y) <=> y % x"""
         return mod(other, self)
 
+    @wrap_mxnp_np_ufunc
     def __imod__(self, other):
         """x.__imod__(y) <=> x %= y"""
         return mod(self, other, out=self)
 
+    @wrap_mxnp_np_ufunc
     def __pow__(self, other):
         """x.__pow__(y) <=> x ** y"""
         return power(self, other)
 
+    @wrap_mxnp_np_ufunc
     def __rpow__(self, other):
         """x.__rpow__(y) <=> y ** x"""
         return power(other, self)
 
+    @wrap_mxnp_np_ufunc
     def __eq__(self, other):
         """x.__eq__(y) <=> x == y"""
         return equal(self, other)
@@ -994,34 +1061,42 @@ class ndarray(NDArray):
     def __hash__(self):
         raise NotImplementedError
 
+    @wrap_mxnp_np_ufunc
     def __ne__(self, other):
         """x.__ne__(y) <=> x != y"""
         return not_equal(self, other)
 
+    @wrap_mxnp_np_ufunc
     def __gt__(self, other):
         """x.__gt__(y) <=> x > y"""
         return greater(self, other)
 
+    @wrap_mxnp_np_ufunc
     def __ge__(self, other):
         """x.__ge__(y) <=> x >= y"""
         return greater_equal(self, other)
 
+    @wrap_mxnp_np_ufunc
     def __lt__(self, other):
         """x.__lt__(y) <=> x < y"""
         return less(self, other)
 
+    @wrap_mxnp_np_ufunc
     def __le__(self, other):
         """x.__le__(y) <=> x <= y"""
         return less_equal(self, other)
 
+    @wrap_mxnp_np_ufunc
     def __matmul__(self, other):
         """x.__matmul__(y) <=> x @ y"""
         return matmul(self, other)
 
+    @wrap_mxnp_np_ufunc
     def __rmatmul__(self, other):
         """x.__rmatmul__(y) <=> y @ x"""
         return matmul(other, self)
 
+    @wrap_mxnp_np_ufunc
     def __imatmul__(self, other):
         """x.__imatmul__(y) <=> x @= y"""
         return matmul(self, other, out=self)
@@ -1826,7 +1901,7 @@ class ndarray(NDArray):
 
     def max(self, axis=None, out=None, keepdims=False):  # pylint: disable=arguments-differ
         """Return the maximum along a given axis."""
-        return _mx_np_op.max(self, axis=axis, keepdims=keepdims, out=out)
+        return _mx_nd_np.max(self, axis=axis, out=out, keepdims=keepdims)
 
     def min(self, axis=None, out=None, keepdims=False):  # pylint: disable=arguments-differ
         """Convenience fluent method for :py:func:`min`.
@@ -1834,7 +1909,7 @@ class ndarray(NDArray):
         The arguments are the same as for :py:func:`min`, with
         this array as data.
         """
-        return _mx_np_op.min(self, axis=axis, keepdims=keepdims, out=out)
+        return _mx_nd_np.min(self, axis=axis, out=out, keepdims=keepdims)
 
     def norm(self, *args, **kwargs):
         """Convenience fluent method for :py:func:`norm`.
@@ -6670,6 +6745,133 @@ def fmin(x1, x2, out=None, **kwargs):
 
 
 @set_module('mxnet.numpy')
+def max(a, axis=None, out=None, keepdims=False):
+    """
+    Return the maximum of an array or maximum along an axis.
+
+    Parameters
+    ----------
+    a : ndarray
+        Input data.
+    axis : int, optional
+        Axis along which to operate.  By default, flattened input is used.
+    out : ndarray, optional
+        Alternative output array in which to place the result.  Must
+        be of the same shape and buffer length as the expected output.
+        See `doc.ufuncs` (Section "Output arguments") for more details.
+    keepdims : bool, optional
+        If this is set to True, the axes which are reduced are left
+        in the result as dimensions with size one. With this option,
+        the result will broadcast correctly against the original `arr`.
+
+    Returns
+    -------
+    max : ndarray
+        Maximum of `a`. If `axis` is None, the result is an array of dimension 1.
+        If `axis` is given, the result is an array of dimension
+        ``a.ndim - 1``.
+
+    See Also
+    --------
+    min :
+        The minimum value of an array along a given axis, ignoring any nan.
+    maximum :
+        Element-wise maximum of two arrays, ignoring any nan.
+    argmax :
+        Return the indices of the maximum values.
+
+    Notes
+    -----
+    NaN in the orginal `numpy` is denoted as nan and will be ignored.
+
+    Don't use `max` for element-wise comparison of 2 arrays; when
+    ``a.shape[0]`` is 2, ``maximum(a[0], a[1])`` is faster than
+    ``max(a, axis=0)``.
+
+    Examples
+    --------
+    >>> a = np.arange(4).reshape((2,2))
+    >>> a
+    array([[0., 1.],
+        [2., 3.]])
+    >>> np.max(a)            # Maximum of the flattened array
+    array(3.)
+    >>> np.max(a, axis=0)    # Maxima along the first axis
+    array([2., 3.])
+    >>> np.max(a, axis=1)    # Maxima along the second axis
+    array([1., 3.])
+
+    >>> b = np.arange(5, dtype=np.float32)
+    >>> b[2] = np.nan
+    >>> np.max(b)
+    array(4.)
+    """
+    return _mx_nd_np.max(a, axis=axis, out=out, keepdims=keepdims)
+
+
+@set_module('mxnet.numpy')
+def min(a, axis=None, out=None, keepdims=False):
+    """
+    Return the minimum of an array or minimum along an axis.
+
+    Parameters
+    ----------
+    a : ndarray
+        Input data.
+    axis : int, optional
+        Axis along which to operate.  By default, flattened input is used.
+    out : ndarray, optional
+        Alternative output array in which to place the result.  Must
+        be of the same shape and buffer length as the expected output.
+        See `doc.ufuncs` (Section "Output arguments") for more details.
+    keepdims : bool, optional
+        If this is set to True, the axes which are reduced are left
+        in the result as dimensions with size one. With this option,
+        the result will broadcast correctly against the original `arr`.
+
+    Returns
+    -------
+    min : ndarray
+        Minimum of `a`. If `axis` is None, the result is an array of dimension 1.
+        If `axis` is given, the result is an array of dimension
+        ``a.ndim - 1``.
+
+    See Also
+    --------
+    max :
+        The maximum value of an array along a given axis, ignoring any nan.
+    minimum :
+        Element-wise minimum of two arrays, ignoring any nan.
+
+    Notes
+    -----
+    NaN in the orginal `numpy` is denoted as nan and will be ignored.
+
+    Don't use `min` for element-wise comparison of 2 arrays; when
+    ``a.shape[0]`` is 2, ``minimum(a[0], a[1])`` is faster than
+    ``min(a, axis=0)``.
+
+    Examples
+    --------
+    >>> a = np.arange(4).reshape((2,2))
+    >>> a
+    array([[0., 1.],
+        [2., 3.]])
+    >>> np.min(a)           # Minimum of the flattened array
+    array(0.)
+    >>> np.min(a, axis=0)   # Minima along the first axis
+    array([0., 1.])
+    >>> np.min(a, axis=1)   # Minima along the second axis
+    array([0., 2.])
+    >>> b = np.arange(5, dtype=np.float32)
+    >>> b[2] = np.nan
+    >>> np.min(b)
+    array(0.) # nan will be ignored
+    """
+    return _mx_nd_np.min(a, axis=axis, out=out, keepdims=keepdims)
+
+
+@set_module('mxnet.numpy')
 def swapaxes(a, axis1, axis2):
     """Interchange two axes of an array.
 
@@ -6903,6 +7105,133 @@ def argmin(a, axis=None, out=None):
     array([0., 0.])
     """
     return _mx_nd_np.argmin(a, axis, out)
+
+
+@set_module('mxnet.numpy')
+def amax(a, axis=None, out=None, keepdims=False):
+    """
+    Return the maximum of an array or maximum along an axis.
+
+    Parameters
+    ----------
+    a : ndarray
+        Input data.
+    axis : int, optional
+        Axis along which to operate.  By default, flattened input is used.
+    out : ndarray, optional
+        Alternative output array in which to place the result.  Must
+        be of the same shape and buffer length as the expected output.
+        See `doc.ufuncs` (Section "Output arguments") for more details.
+    keepdims : bool, optional
+        If this is set to True, the axes which are reduced are left
+        in the result as dimensions with size one. With this option,
+        the result will broadcast correctly against the original `arr`.
+
+    Returns
+    -------
+    max : ndarray
+        Maximum of `a`. If `axis` is None, the result is an array of dimension 1.
+        If `axis` is given, the result is an array of dimension
+        ``a.ndim - 1``.
+
+    See Also
+    --------
+    min :
+        The minimum value of an array along a given axis, ignoring any nan.
+    maximum :
+        Element-wise maximum of two arrays, ignoring any nan.
+    argmax :
+        Return the indices of the maximum values.
+
+    Notes
+    -----
+    NaN in the orginal `numpy` is denoted as nan and will be ignored.
+
+    Don't use `max` for element-wise comparison of 2 arrays; when
+    ``a.shape[0]`` is 2, ``maximum(a[0], a[1])`` is faster than
+    ``max(a, axis=0)``.
+
+    Examples
+    --------
+    >>> a = np.arange(4).reshape((2,2))
+    >>> a
+    array([[0., 1.],
+        [2., 3.]])
+    >>> np.max(a)            # Maximum of the flattened array
+    array(3.)
+    >>> np.max(a, axis=0)    # Maxima along the first axis
+    array([2., 3.])
+    >>> np.max(a, axis=1)    # Maxima along the second axis
+    array([1., 3.])
+
+    >>> b = np.arange(5, dtype=np.float32)
+    >>> b[2] = np.nan
+    >>> np.max(b)
+    array(4.)
+    """
+    return _mx_nd_np.amax(a, axis=axis, out=out, keepdims=keepdims)
+
+
+@set_module('mxnet.numpy')
+def amin(a, axis=None, out=None, keepdims=False):
+    """
+    Return the minimum of an array or minimum along an axis.
+
+    Parameters
+    ----------
+    a : ndarray
+        Input data.
+    axis : int, optional
+        Axis along which to operate.  By default, flattened input is used.
+    out : ndarray, optional
+        Alternative output array in which to place the result.  Must
+        be of the same shape and buffer length as the expected output.
+        See `doc.ufuncs` (Section "Output arguments") for more details.
+    keepdims : bool, optional
+        If this is set to True, the axes which are reduced are left
+        in the result as dimensions with size one. With this option,
+        the result will broadcast correctly against the original `arr`.
+
+    Returns
+    -------
+    min : ndarray
+        Minimum of `a`. If `axis` is None, the result is an array of dimension 1.
+        If `axis` is given, the result is an array of dimension
+        ``a.ndim - 1``.
+
+    See Also
+    --------
+    max :
+        The maximum value of an array along a given axis, ignoring any nan.
+    minimum :
+        Element-wise minimum of two arrays, ignoring any nan.
+
+    Notes
+    -----
+    NaN in the orginal `numpy` is denoted as nan and will be ignored.
+
+    Don't use `min` for element-wise comparison of 2 arrays; when
+    ``a.shape[0]`` is 2, ``minimum(a[0], a[1])`` is faster than
+    ``min(a, axis=0)``.
+
+    Examples
+    --------
+    >>> a = np.arange(4).reshape((2,2))
+    >>> a
+    array([[0., 1.],
+        [2., 3.]])
+    >>> np.min(a)           # Minimum of the flattened array
+    array(0.)
+    >>> np.min(a, axis=0)   # Minima along the first axis
+    array([0., 1.])
+    >>> np.min(a, axis=1)   # Minima along the second axis
+    array([0., 2.])
+    >>> b = np.arange(5, dtype=np.float32)
+    >>> b[2] = np.nan
+    >>> np.min(b)
+    array(0.) # nan will be ignored
+    """
+    return _mx_nd_np.amin(a, axis=axis, out=out, keepdims=keepdims)
 
 
 @set_module('mxnet.numpy')

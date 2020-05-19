@@ -2558,7 +2558,7 @@ def test_np_binary_funcs():
 
 @with_seed()
 @use_np
-@pytest.mark.flaky(max_runs=3)
+@pytest.mark.skip(reason='https://github.com/apache/incubator-mxnet/issues/16848')
 def test_np_mixed_precision_binary_funcs():
     itypes = [np.bool, np.int8, np.int32, np.int64]
     ftypes = [np.float16, np.float32, np.float64]
@@ -2659,6 +2659,46 @@ def test_np_mixed_precision_binary_funcs():
                     continue
                 check_mixed_precision_binary_func(func, low, high, lshape, rshape, lgrad, rgrad, type1, type2)
 
+@with_seed()
+@use_np
+def test_np_mixed_mxnp_op_funcs():
+    # generate onp & mx_np in same type
+    onp = _np.array([1,2,3,4,5]).astype("int64")
+    mx_np = mx.np.array([1,2,3,4,5]).astype("int64")
+    # inplace onp mx_np
+    onp += mx_np
+    assert isinstance(onp, _np.ndarray)
+    onp -= mx_np
+    assert isinstance(onp, _np.ndarray)
+    onp *= mx_np
+    assert isinstance(onp, _np.ndarray)
+    # inplace mx_np onp
+    mx_np ^= onp
+    assert isinstance(mx_np, mx.np.ndarray)
+    mx_np |= onp
+    assert isinstance(mx_np, mx.np.ndarray)
+    mx_np &= onp
+    assert isinstance(mx_np, mx.np.ndarray)
+    # mxnp onp
+    out = mx_np << onp
+    assert isinstance(out, mx.np.ndarray)
+    out = mx_np >> onp
+    assert isinstance(out, mx.np.ndarray)
+    out = mx_np != onp
+    assert isinstance(out, mx.np.ndarray)
+    # onp mxnp
+    out = onp == mx_np
+    assert isinstance(out, mx.np.ndarray)
+    out = onp >= mx_np
+    assert isinstance(out, mx.np.ndarray)
+    out = onp < mx_np
+    assert isinstance(out, mx.np.ndarray)
+    onp = _np.array([1,2,3,4,5]).astype("float32")
+    mx_np = mx.np.array([1,2,3,4,5]).astype("float32")
+    out = onp @ mx_np
+    assert isinstance(out, mx.np.ndarray)
+    out = onp / mx_np
+    assert isinstance(out, mx.np.ndarray)
 
 @with_seed()
 @use_np
