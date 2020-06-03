@@ -106,6 +106,56 @@ MXNET_OPERATOR_REGISTER_BINARY_WITH_SPARSE_CPU(_backward_relu, unary_bwd<mshadow
       return ret;
     });
 
+
+#if MXNET_USE_MKLDNN == 1
+bool SupportMKLDNNSigmoid(const NDArray& input) {
+  return (input.dtype() == mshadow::kFloat32 || input.dtype() == mshadow::kBfloat16) &&
+         input.storage_type() == kDefaultStorage;
+}
+
+static void SigmoidComputeExCPU(const nnvm::NodeAttrs& attrs,
+                                const OpContext& ctx,
+                                const std::vector<NDArray>& inputs,
+                                const std::vector<OpReqType>& req,
+                                const std::vector<NDArray>& outputs) {
+  CHECK(!inputs.empty());
+  CHECK_EQ(outputs.size(), 1U);
+
+  if (inputs[0].dtype() == outputs[0].dtype()) {
+    if (SupportMKLDNNSigmoid(inputs[0])) {
+      MKLDNNRun(MKLDNNSigmoidForward, attrs, ctx, inputs[0], req[0], outputs[0]);
+    } else if (common::ContainsOnlyStorage(inputs, kDefaultStorage)) {
+      FallBackCompute(UnaryOp::Compute<cpu, mshadow_op::sigmoid>, attrs, ctx,
+                      inputs, req, outputs);
+    }
+    return;
+  }
+  // if (SupportMKLDNNSoftmax(param, inputs[0], outputs[0])) {
+  //   MKLDNN_OPCHECK_INIT(false, outputs.size(), inputs, outputs);
+  //   MKLDNNRun(MKLDNNSoftmaxForward, attrs, ctx, inputs[0], req[0], outputs[0]);
+  //   auto fn = SoftmaxCompute<cpu, mxnet_op::softmax_fwd>;
+  //   MKLDNN_OPCHECK_RUN(fn, attrs, ctx, inputs, req, outputs);
+  //   return;
+  // }
+  FallBackCompute(UnaryOp::Compute<cpu, mshadow_op::sigmoid>, attrs, ctx,
+                  inputs, req, outputs);
+}
+
+inline static bool SigmoidStorageType(const nnvm::NodeAttrs& attrs,
+                                      const int dev_mask,
+                                      DispatchMode* dispatch_mode,
+                                      std::vector<int> *in_attrs,
+                                      std::vector<int> *out_attrs) {
+  CHECK_EQ(in_attrs->size(),  1U);
+  CHECK_EQ(out_attrs->size(), 1U);
+
+  return MKLDNNStorageType(attrs, dev_mask, true, dispatch_mode, in_attrs,
+                           out_attrs);
+}
+
+#endif
+
+
 // sigmoid
 MXNET_OPERATOR_REGISTER_UNARY(sigmoid)
 MXNET_ADD_SPARSE_OP_ALIAS(sigmoid)
@@ -117,6 +167,11 @@ MXNET_ADD_SPARSE_OP_ALIAS(sigmoid)
 The storage type of ``sigmoid`` output is always dense
 
 )code" ADD_FILELINE)
+#if MXNET_USE_MKLDNN == 1
+.set_attr<bool>("TIsMKLDNN", true)
+.set_attr<FComputeEx>("FComputeEx<cpu>", SigmoidComputeExCPU)
+.set_attr<FInferStorageType>("FInferStorageType", SigmoidStorageType)
+#endif
 .set_attr<FCompute>("FCompute<cpu>", UnaryOp::Compute<cpu, mshadow_op::sigmoid>)
 .set_attr<nnvm::FGradient>("FGradient", ElemwiseGradUseOut{"_backward_sigmoid"});
 

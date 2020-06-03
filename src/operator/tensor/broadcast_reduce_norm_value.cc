@@ -92,7 +92,7 @@ Examples::
 .set_attr_parser(ParamParser<NormParam>)
 .set_attr<mxnet::FInferShape>("FInferShape", NormShape)
 .set_attr<nnvm::FInferType>("FInferType", NormType)
-.set_attr<FInferStorageType>("FInferStorageType", LpNormStorageType)
+.set_attr<FInferStorageType>("FInferStorageType", LpNormStorageType) //TODO -> MKLDNN
 .set_attr<nnvm::FGradient>("FGradient", ReduceGrad{ "_backward_norm" })
 .set_attr<FResourceRequest>("FResourceRequest",
   [](const NodeAttrs& attrs) {
@@ -100,7 +100,7 @@ Examples::
   })
 .set_attr<THasDeterministicOutput>("THasDeterministicOutput", true)
 .set_attr<FCompute>("FCompute<cpu>", LpNormCompute<cpu>)
-.set_attr<FComputeEx>("FComputeEx<cpu>", L2NormComputeEx<cpu>)
+.set_attr<FComputeEx>("FComputeEx<cpu>", L2NormComputeEx<cpu>) //TODO -> MKLDNN
 .add_argument("data", "NDArray-or-Symbol", "The input")
 .add_arguments(NormParam::__FIELDS__());
 

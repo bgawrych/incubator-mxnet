@@ -147,6 +147,12 @@ void MKLDNNReshapeForward(const nnvm::NodeAttrs& attrs,
                           const NDArray &input,
                           const OpReqType &req,
                           const NDArray &output);
+
+void MKLDNNSigmoidForward(const nnvm::NodeAttrs& attrs,
+                          const OpContext &ctx,
+                          const NDArray &input,
+                          const OpReqType &req,
+                          const NDArray &output);
 }  // namespace op
 }  // namespace mxnet
 
