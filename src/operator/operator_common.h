@@ -245,7 +245,9 @@ inline bool dispatch_mode_assign(DispatchMode *y, const DispatchMode& x) {
       std::ostringstream os;                                                \
       os << "Type inconsistent, Provided = "                                \
          << ::mxnet::op::type_string((type_array)[index]) << ','            \
-         << " inferred type = " << ::mxnet::op::type_string(type);          \
+         << " inferred type = " << ::mxnet::op::type_string(type)           \
+         << " " << __FILE__  << ":" << __LINE__ << " " ; \
+         ;          \
       throw ::mxnet::op::InferTypeError(os.str(), index);                   \
     }                                                                       \
   }

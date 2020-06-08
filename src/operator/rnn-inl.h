@@ -881,7 +881,7 @@ class RNNOp {
           init_space_ = true;
         }
         DType* reserve_space_ptr = static_cast<DType*>(reserve_cpu_space_.data().dptr_);
-
+        LOG(INFO) << "WTF\n";
         RNNForwardTraining<DType>(work_cpu_space,
                                   reserve_space_ptr,
                                   param_.state_outputs,
@@ -1525,7 +1525,7 @@ void RNNStatefulCompute(const OpStatePtr& state,
                         const std::vector<OpReqType>& req,
                         const std::vector<TBlob>& outputs) {
   int dtype = inputs[rnn_enum::kData].type_flag_;
-
+  LOG(INFO) << "NATIVE\n";
   // Hacky. This relies on fact that seq-len type is either the last input,
   // or we aren't using seq-len input and this type should be same as dtype.
   // Would prefer direct access to RNNParam object here but not sure how to get.
@@ -1533,6 +1533,7 @@ void RNNStatefulCompute(const OpStatePtr& state,
 
   MSHADOW_REAL_TYPE_SWITCH(dtype, DType, {
     MSHADOW_TYPE_SWITCH(itype, IType, {
+      LOG(INFO) << "NATIVE\n";
       RNNOp<xpu, DType, IType>& op = state.get_state<RNNOp<xpu, DType, IType>>();
       op.Forward(ctx, inputs, req, outputs);
     });

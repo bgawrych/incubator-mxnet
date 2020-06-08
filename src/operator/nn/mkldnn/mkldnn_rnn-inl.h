@@ -131,20 +131,30 @@ class RnnPrimitive {
   template<typename rnn_fwd, typename... Args>
   static RnnPrimitive Create(Args&&... args) {
     RnnPrimitive rnn_fwd_prim;
+    LOG(INFO) << "1";
     auto fwd_desc = typename rnn_fwd::desc(std::forward<Args>(args)...);
+    LOG(INFO) << "1x";
+    if(rnn_fwd_prim.fwd_pd_ == nullptr){
+      LOG(INFO) << "WTF";
+    }
     rnn_fwd_prim.fwd_pd_.reset(
       new typename rnn_fwd::primitive_desc(fwd_desc, CpuEngine::Get()->get_engine()),
       [](typename rnn_fwd::primitive_desc* pd) {
+        LOG(INFO) << "1z";
         delete reinterpret_cast<typename rnn_fwd::primitive_desc*>(pd);
       });
+    LOG(INFO) << "2";
     auto fwd_pd = reinterpret_cast<typename rnn_fwd::primitive_desc*>(rnn_fwd_prim.fwd_pd_.get());
+    LOG(INFO) << "3";
     rnn_fwd_prim.weights_layer_desc_ = fwd_pd->weights_layer_desc();
     rnn_fwd_prim.weights_iter_desc_  = fwd_pd->weights_iter_desc();
     rnn_fwd_prim.weights_proj_desc_  = fwd_pd->weights_projection_desc();
     rnn_fwd_prim.workspace_desc_ = fwd_pd->workspace_desc();
 
+    LOG(INFO) << "4";
     rnn_fwd_prim.primitive_ = std::shared_ptr<mkldnn::primitive>(new rnn_fwd(*fwd_pd));
 
+    LOG(INFO) << "5";
     return rnn_fwd_prim;
   }
 
@@ -467,7 +477,8 @@ class MKLDNNRnnOp {
 };
 
 inline bool SupportMKLDNNRnn(const int input_dtype) {
-  if (input_dtype == mshadow::kFloat32 && dmlc::GetEnv("MXNET_USE_MKLDNN_RNN", 1)) {
+  if ((input_dtype == mshadow::kFloat32 || input_dtype == mshadow::kBfloat16)
+     && dmlc::GetEnv("MXNET_USE_MKLDNN_RNN", 1)) {
     return true;
   }
   return false;

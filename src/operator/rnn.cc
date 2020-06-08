@@ -194,6 +194,7 @@ inline static bool RNNStorageType(const nnvm::NodeAttrs& attrs,
                                   std::vector<int> *in_attrs,
                                   std::vector<int> *out_attrs) {
   const bool support_mkldnn_rnn = dmlc::GetEnv("MXNET_USE_MKLDNN_RNN", 1);
+  LOG(INFO) << "XXXXXXXD\n";
   return MKLDNNStorageType(attrs, dev_mask, support_mkldnn_rnn,
                            dispatch_mode, in_attrs, out_attrs);
 }
@@ -240,8 +241,10 @@ static OpStatePtr CreateRNNState(const nnvm::NodeAttrs &attrs,
   }
 
 #if MXNET_USE_MKLDNN == 1
+LOG(INFO) << "XXXXXXXD___\n";
   if (ctx.dev_type == kCPU && SupportMKLDNNRnn(in_types[rnn_enum::kData])) {
     const mxnet::TShape& data_shape = in_shapes[rnn_enum::kData];
+    LOG(INFO) << "XXXXXXXD___23\n";
     state = OpStatePtr::Create<MKLDNNRnnOp>(param, data_shape[0],
         data_shape[1], data_shape[2]);
     return state;
@@ -267,9 +270,12 @@ static void RNNStatefulComputeExCPU(const OpStatePtr& state_ptr,
                                     const std::vector<OpReqType>& req,
                                     const std::vector<NDArray>& outputs) {
   if (SupportMKLDNNRnn(inputs[rnn_enum::kData].dtype())) {
+    LOG(INFO) << "TUTTAJ\n";
     MKLDNNRnnOp& op = state_ptr.get_state<MKLDNNRnnOp>();
     op.Forward(ctx, inputs, req, outputs);
+    LOG(INFO) << "TUTTAJ END\n";
   } else {
+    LOG(INFO) << "EXEXE END\n";
     FallBackCompute(RNNStatefulCompute<cpu>, state_ptr, ctx, inputs, req, outputs);
   }
 }

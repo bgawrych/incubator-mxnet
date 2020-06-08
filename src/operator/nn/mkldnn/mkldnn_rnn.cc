@@ -94,6 +94,8 @@ MKLDNNRnnFullParam MKLDNNRnnFullParamParser(const RNNParam& rnn_param, const ind
       rnn_param.projection_size.value() : state_size;
   LayerParamVector &layer_params = full_param.layer_params;
 
+
+  LOG(INFO) << "XXXXXXXD___PARAM\n";
   full_param.default_param.seq_length_ = seq_len;
   full_param.default_param.batch_size_ = batch_size;
   full_param.default_param.input_size_ = input_size;
@@ -164,6 +166,11 @@ RnnPrimitive GetRnnFwdPrim(
   const int mode = layer_param.mode;
   memory::data_type data_type = get_mkldnn_type(data.dtype());
   memory::data_type weight_type = get_mkldnn_type(params.dtype());
+  LOG(INFO) << "input dtype: "<< data.dtype();
+  LOG(INFO) << "weight dtype: "<< params.dtype();
+
+  LOG(INFO) << (is_train ? "TRAING" : "INFERENCE");
+
   const prop_kind prop = is_train ? prop_kind::forward_training : prop_kind::forward_inference;
   const rnn_direction mkldnn_rnn_direction = layer_param.bidirectional ?
       rnn_direction::bidirectional_concat : rnn_direction::unidirectional;
@@ -171,7 +178,7 @@ RnnPrimitive GetRnnFwdPrim(
   auto src_layer_desc    = memory::desc(layer_param.src_dims, data_type, tag::tnc);
   auto weight_layer_desc = memory::desc(layer_param.weight_layer_dims, weight_type, tag::any);
   auto weight_iter_desc  = memory::desc(layer_param.weight_iter_dims, weight_type, tag::any);
-  auto bias_desc         = memory::desc(layer_param.bias_dims, data_type, tag::ldgo);
+  auto bias_desc         = memory::desc(layer_param.bias_dims, mkldnn::memory::data_type::f32, tag::ldgo);
   auto dst_layer_desc    = memory::desc(layer_param.dst_dims, data_type, tag::tnc);
   auto src_state_desc    = memory::desc(layer_param.state_dims, data_type, tag::ldnc);
   auto src_cell_desc     = memory::desc(layer_param.cell_dims, data_type, tag::ldnc);
@@ -192,6 +199,7 @@ RnnPrimitive GetRnnFwdPrim(
           dst_layer_desc, dst_state_desc, dst_cell_desc);
       break;
     case rnn_enum::kGru:
+      LOG(INFO) << "GRU MKLDNN";
       fwd = RnnPrimitive::Create<lbr_gru_forward>(prop, mkldnn_rnn_direction,
           src_layer_desc, src_state_desc, weight_layer_desc,
           weight_iter_desc, bias_desc, dst_layer_desc, dst_state_desc);
@@ -996,6 +1004,7 @@ void MKLDNNRnnOp::Forward(const OpContext &ctx,
                           const std::vector<OpReqType> &req,
                           const std::vector<NDArray> &outputs) {
   TmpMemMgr::Get()->Init(ctx.requested[1]);
+    LOG(INFO) << "XXXXXXXDYYYY\n";
   // In the `autograd.record()` context, RNNOp is required to run into
   // forward_training mode.
   const bool is_training = (ctx.is_train || ctx.need_grad);
@@ -1124,6 +1133,7 @@ void MKLDNNRnnOp::Forward(const OpContext &ctx,
     if (default_param.mode == rnn_enum::kLstm)
       CommitOutput(outputs[rnn_enum::kStateCellOut], statecellout_mem);
   }
+  LOG(INFO) << "XXXXXXXDZZZZ\n";
   MKLDNNStream::Get()->Submit();
 }
 

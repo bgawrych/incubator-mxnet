@@ -679,16 +679,16 @@ def test_rnn_layers_fp16():
 
 
 def check_rnn_consistency(fused_layer, stack_layer, loss, input_size, hidden_size, bidirectional=False, rtol=1e-2, atol=1e-4):
-    x = nd.random.normal(shape=(1, 5, input_size))
+    x = nd.random.normal(shape=(1, 5, input_size), dtype='bfloat16')
     fused_begin_state = fused_layer.begin_state(1)
-    stack_states = stack_layer.begin_state(batch_size=1)
+    stack_states = stack_layer.begin_state(batch_size=1, dtype='bfloat16')
     fused_layer.infer_shape(x, fused_begin_state)
     fused_layer_params = fused_layer.collect_params()
     stack_layer_params = stack_layer.collect_params()
 
     for name, value in fused_layer_params.items():
         if 'rnn' in fused_layer.prefix and 'weight' in name:
-            w = mx.nd.zeros(shape=value.shape)
+            w = mx.nd.zeros(shape=value.shape, dtype='bfloat16')
         else:
             w = mx.nd.random.normal(shape=value.shape)
         value.set_data(w.copy())
@@ -696,7 +696,7 @@ def check_rnn_consistency(fused_layer, stack_layer, loss, input_size, hidden_siz
 
     fx = x.copy()
     sx = x.copy()
-    y = nd.random.uniform(shape=(1, 5, hidden_size * 2 if bidirectional else hidden_size))
+    y = nd.random.uniform(shape=(1, 5, hidden_size * 2 if bidirectional else hidden_size), dtype='bfloat16')
 
     fx.attach_grad()
     with mx.autograd.record():
@@ -747,7 +747,7 @@ def create_op_by_mode(mode):
 def check_rnn_unidir_layer_gradients(mode, input_size, hidden_size, num_layers, loss):
     fused_op, stack_op, recurrent_block_prefix = create_op_by_mode(mode)
 
-    fused_layer = fused_op(hidden_size, num_layers=num_layers, layout='NTC', bidirectional=False, prefix=recurrent_block_prefix)
+    fused_layer = fused_op(hidden_size, num_layers=num_layers, layout='NTC', bidirectional=False, prefix=recurrent_block_prefix, dtype='bfloat16')
     fused_layer.initialize()
 
     stack_layer = mx.gluon.rnn.HybridSequentialRNNCell(prefix=recurrent_block_prefix)
@@ -761,7 +761,7 @@ def check_rnn_unidir_layer_gradients(mode, input_size, hidden_size, num_layers, 
 def check_rnn_bidir_layer_gradients(mode, input_size, hidden_size, num_layers, loss):
     fused_op, stack_op, recurrent_block_prefix = create_op_by_mode(mode)
 
-    fused_layer = fused_op(hidden_size, num_layers=num_layers, layout='NTC', bidirectional=True, prefix=recurrent_block_prefix)
+    fused_layer = fused_op(hidden_size, num_layers=num_layers, layout='NTC', bidirectional=True, prefix=recurrent_block_prefix, dtype='bfloat16')
     fused_layer.initialize()
 
     stack_layer = mx.gluon.rnn.HybridSequentialRNNCell(prefix=recurrent_block_prefix)

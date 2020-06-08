@@ -103,6 +103,7 @@ struct SampleUniformParam : public dmlc::Parameter<SampleUniformParam>,
     .add_enum("float32", mshadow::kFloat32)
     .add_enum("float64", mshadow::kFloat64)
     .add_enum("float16", mshadow::kFloat16)
+    .add_enum("bfloat16", mshadow::kBfloat16)
     .set_default(-1)
     .describe("DType of the output in case this can't be inferred. "
               "Defaults to float32 if not defined (dtype=None).");
@@ -128,6 +129,7 @@ struct SampleNormalParam : public dmlc::Parameter<SampleNormalParam>,
     .add_enum("float32", mshadow::kFloat32)
     .add_enum("float64", mshadow::kFloat64)
     .add_enum("float16", mshadow::kFloat16)
+    .add_enum("bfloat16", mshadow::kBfloat16)
     .set_default(-1)
     .describe("DType of the output in case this can't be inferred. "
               "Defaults to float32 if not defined (dtype=None).");
@@ -751,10 +753,10 @@ inline bool SampleOpType(const nnvm::NodeAttrs& attrs,
     }
   }
   bool dtype_ok = (dtype == mshadow::kFloat16) || (dtype == mshadow::kFloat32) ||
-  (dtype == mshadow::kFloat64);
+  (dtype == mshadow::kFloat64) || (dtype == mshadow::kBfloat16);
   CHECK(dtype_ok) << "Output type must be float16, float32, float64: dtype is "
   << dtype_out << " vs " << mshadow::kFloat16 << " or " << mshadow::kFloat32 << " or "
-  << mshadow::kFloat64;
+  << mshadow::kFloat64 << " or " << mshadow::kBfloat16;
   TYPE_ASSIGN_CHECK(*out_type, 0, dtype);
   return true;
 }

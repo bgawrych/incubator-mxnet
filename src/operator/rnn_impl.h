@@ -633,6 +633,8 @@ void GruForwardInferenceSingleLayer(DType* ws,
                                     DType* bh_ptr,
                                     DType* y_ptr,
                                     DType* hy_ptr) {
+                                      
+LOG(INFO) << "XXXXXXXD___GRUNATV_INF\n";
   DType* ht = y_ptr;
   DType* ht_1 = y_ptr;
   DType* back_ht_1 = y_ptr + (T-1) * N * H * D + H;
@@ -1007,6 +1009,8 @@ void GruForwardTraining(DType* ws,
                         DType* hy_ptr,
                         const float dropout,
                         std::mt19937 &rnd_engine) {  // NOLINT(runtime/references)
+                        
+LOG(INFO) << "XXXXXXXD___GRUNATV\n";
   DType* wx = w_ptr;
   DType* wh = wx + I * H * 3;
   DType* bx = wh + H * H * 3 + (D - 1) * (H * H * 3 + I * H * 3)
