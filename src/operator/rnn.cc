@@ -143,28 +143,48 @@ static bool RNNType(const nnvm::NodeAttrs& attrs,
 
   size_t seq_len_input_idx = rnn_enum::kSequenceLength;
   if (param_.mode != rnn_enum::kLstm)  --seq_len_input_idx;
-
   int dtype = (*in_type)[0];
+  int cellstate_dtype = dtype;
+  int out_dtype = dtype;
+  int params_dtype = dtype;
+  #if MXNET_USE_MKLDNN == 1
+  if(dtype == mshadow::kBfloat16 && SupportMKLDNNRnn(dtype)) {  // in onednn cell state for bf16
+    cellstate_dtype = mshadow::kFloat32;                        // calculation is fp32
+    params_dtype = mshadow::kFloat32;                           // bias is also in fp32 
+
+    // for RNN in oneDNN all diff tensors are required to be in fp32
+    // so it's make sense to out results in fp32 to automatic infer gradient tensors
+    out_dtype = mshadow::kFloat32;
+  }
+  #endif
+
   CHECK_NE(dtype, -1) << "First input must have specified type";
   std::vector<std::string> arguments = ListArguments(param_);
-  for (size_t i = 0; i < in_type->size(); ++i) {
-    if ((*in_type)[i] == -1) {
-      TYPE_ASSIGN_CHECK(*in_type, i, dtype);
+
+  const auto inferInputType = [&](int index, int expected_type){
+    if ((*in_type)[index] == -1) {
+      TYPE_ASSIGN_CHECK(*in_type, index, dtype);
     } else {
-      // If using sequence length argument, it has its own indexing type
-      // All other input arguments must match the main data type
-      if (!(param_.use_sequence_length && i == seq_len_input_idx)) {
-        UNIFORM_TYPE_CHECK((*in_type)[i], dtype, arguments[i]);
-      }
+      UNIFORM_TYPE_CHECK((*in_type)[index], expected_type, arguments[index]);
     }
-  }
+  };
+
+  inferInputType(rnn_enum::kParams, params_dtype);
+  inferInputType(rnn_enum::kState,  dtype);
+  if(param_.mode == rnn_enum::kLstm)
+    inferInputType(rnn_enum::kStateCell, cellstate_dtype);
+    
+  // If using sequence length argument, it has its own indexing type
+  if(param_.use_sequence_length && (*in_type)[seq_len_input_idx] == -1)
+      TYPE_ASSIGN_CHECK(*in_type, seq_len_input_idx, dtype);
+
   out_type->clear();
   out_type->push_back(dtype);
   if (param_.state_outputs) {
     out_type->push_back(dtype);
     // Deal with lstm cell state
     if (param_.mode == rnn_enum::kLstm) {
-      out_type->push_back(dtype);
+      out_type->push_back(out_dtype);
     }
   }
   return true;
@@ -423,17 +443,7 @@ The definition of GRU here is slightly different from paper but compatible with 
 NNVM_REGISTER_OP(_backward_RNN)
 .set_num_inputs([](const NodeAttrs& attrs) {
     const RNNParam& params = nnvm::get<RNNParam>(attrs.parsed);
-    int ret = 5;
-    if (params.state_outputs) {
-      ret += 2;
-    }
-    if (params.mode == rnn_enum::kLstm) {
-      ++ret;
-      if (params.state_outputs) {
-      ret += 2;
-      }
-    }
-    return ret;
+    return GetNumBwdInputArguments(params);
 })
 .set_num_outputs([](const NodeAttrs& attrs) {
   const RNNParam& params = nnvm::get<RNNParam>(attrs.parsed);

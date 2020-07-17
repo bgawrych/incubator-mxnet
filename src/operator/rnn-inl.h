@@ -250,6 +250,20 @@ inline size_t GetNumInputArguments(RNNParam param_) {
   return num_inputs;
 }
 
+inline size_t GetNumBwdInputArguments(RNNParam param_) {
+    int num_inputs = 5;
+    if (param_.state_outputs) {
+      num_inputs += 2;
+    }
+    if (param_.mode == rnn_enum::kLstm) {
+      ++num_inputs;
+      if (param_.state_outputs) {
+      num_inputs += 2;
+      }
+    }
+    return num_inputs;
+}
+
 /**
  * @params: ws: Temp workspace for gemm's output storage.
  *          rs: Reserve space of forward intermediate data used for training.

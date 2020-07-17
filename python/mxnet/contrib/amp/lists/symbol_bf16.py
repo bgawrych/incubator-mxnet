@@ -22,6 +22,7 @@
 BF16_FUNCS = [
     'Convolution',
     'FullyConnected',
+    'RNN',
     ]
 
 # Functions that should not be casted, either because
@@ -50,13 +51,13 @@ BF16_FP32_FUNCS = [
 BF16_USE_FP32_PARAMS = {
     'BatchNormWithReLU': ["", "gamma", "beta", "moving_mean", "moving_var"],
     'BatchNorm': ["", "gamma", "beta", "moving_mean", "moving_var"],
+    'RNN': ["", "params", "", "state_cell"],
 }
 
 # Functions that have to be cast to FP32 due to possible
 # overflows
 FP32_FUNCS = [
     'Deconvolution',
-    'RNN',
     'BatchNorm_v1',
     'BilinearSampler',
     'BlockGrad',
@@ -480,7 +481,7 @@ FP32_FUNCS = [
     # Neural network
     'SoftmaxOutput',
     'softmax',
-    'Softmax',
+    #'Softmax',
     'log_softmax',
     'InstanceNorm',
     'LayerNorm',

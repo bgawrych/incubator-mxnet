@@ -47,14 +47,17 @@ struct MKLDNNRnnLayerParam {
   int batch_size;
   int input_size;
   int state_size;
+  int proj_size;
   int seq_len;
 
   dims src_dims;           // Dimensions of source input in format_tag::tnc
   dims weight_layer_dims;  // Dimensions of layer weights in format_tag::ldigo
   dims weight_iter_dims;   // Dimensions of iter weights in format_tag::ldigo
+  dims weight_proj_dims;   // Dimensions of iter weights in format_tag::ldigo
   dims bias_dims;          // Dimensions of bias in format_tag::ldgo
   dims dst_dims;           // Dimensions of output in format_tag::tnc
   dims state_dims;         // Dimensions of the state cell in format_tag::ldnc
+  dims cell_dims;         // Dimensions of the state cell in format_tag::ldnc
 
   size_t workspace_size;  // used for the cached mkl-dnn memory in Forward inference
   size_t reserve_size;    // used for the reserved cached memory in Backward
@@ -64,11 +67,11 @@ struct MKLDNNRnnLayerParam {
   size_t single_state_size;     // state size of a single cell, hy, cy
 
   MKLDNNRnnLayerParam(int num_layer, int batch_size, int seq_len,
-                      int input_size, int state_size,
+                      int input_size, int state_size, int proj_size,
                       int mode, bool bidirectional = true)
       : mode(mode), bidirectional(bidirectional), state_outputs(true),
         num_layer(num_layer), batch_size(batch_size), input_size(input_size),
-        state_size(state_size), seq_len(seq_len) { }
+        state_size(state_size), proj_size(proj_size), seq_len(seq_len) { }
 
   void SetDims();
 };
@@ -102,6 +105,7 @@ class MKLDNNRnnMemMgr {
  public:
   void Init(dim_t size, const Context& ctx, int dtype = mshadow::kFloat32);
 
+  const size_t Size() { return mem_size; }
   void RegisterMem(std::shared_ptr<const mkldnn::memory> mem) {
     mem_holder.push_back(mem);
   }
@@ -141,6 +145,7 @@ class RnnPrimitive {
     this->primitive_ = nullptr;
     this->weights_layer_desc_ = mkldnn::memory::desc();
     this->weights_iter_desc_ = mkldnn::memory::desc();
+    this->weights_proj_desc_ = mkldnn::memory::desc();
     this->workspace_desc_ = mkldnn::memory::desc();
   }
 
@@ -149,6 +154,7 @@ class RnnPrimitive {
     this->primitive_ = rnn_fwd_prim.primitive_;
     this->weights_layer_desc_ = rnn_fwd_prim.weights_layer_desc_;
     this->weights_iter_desc_ = rnn_fwd_prim.weights_iter_desc_;
+    this->weights_proj_desc_ = rnn_fwd_prim.weights_proj_desc_;
     this->workspace_desc_ = rnn_fwd_prim.workspace_desc_;
   }
 
@@ -158,6 +164,7 @@ class RnnPrimitive {
       this->primitive_ = rnn_fwd_prim.primitive_;
       this->weights_layer_desc_ = rnn_fwd_prim.weights_layer_desc_;
       this->weights_iter_desc_ = rnn_fwd_prim.weights_iter_desc_;
+      this->weights_proj_desc_ = rnn_fwd_prim.weights_proj_desc_;
       this->workspace_desc_ = rnn_fwd_prim.workspace_desc_;
     }
 
@@ -175,6 +182,9 @@ class RnnPrimitive {
     return weights_iter_desc_;
   }
 
+  const mkldnn::memory::desc& GetProjDesc() const {
+    return weights_proj_desc_;
+  }
   const mkldnn::memory::desc& GetWorkspaceDesc() const {
     return workspace_desc_;
   }
@@ -184,6 +194,7 @@ class RnnPrimitive {
   std::shared_ptr<mkldnn::primitive> primitive_;
   mkldnn::memory::desc weights_layer_desc_;
   mkldnn::memory::desc weights_iter_desc_;
+  mkldnn::memory::desc weights_proj_desc_;
   mkldnn::memory::desc workspace_desc_;
 };
 
@@ -195,9 +206,9 @@ RnnPrimitive GetRnnFwdPrim(const MKLDNNRnnLayerParam &layer_param, const bool is
  */
 class MKLDNNRnnForward {
  public:
-  MKLDNNRnnForward(const MKLDNNRnnLayerParam &layer_param, const bool is_train,
+  MKLDNNRnnForward(const Context ctx, const MKLDNNRnnLayerParam &layer_param, const bool is_train,
                    const NDArray &data, const NDArray &params)
-      : initialized_(false), param_(layer_param),
+      : ctx_(ctx), initialized_(false), param_(layer_param),
         fwd_inf_(GetRnnFwdPrim(layer_param, false, data, params)) { }
 
   void SetNewDataMem(void* x, void* hx, void* cx,
@@ -210,14 +221,12 @@ class MKLDNNRnnForward {
 
   const mkldnn::primitive& GetFwd() const { return fwd_inf_.GetPrim(); }
 
-  const size_t GetSize(int dtype) const {
-    size_t bytes = mshadow::mshadow_sizeof(dtype);
-    size_t size = 0;
-    size += fwd_inf_.GetLayerDesc().get_size();
-    size += fwd_inf_.GetIterDesc().get_size();
-    return size / bytes + 1;
-  }
-
+  const size_t GetSize() const {
+      const size_t size = fwd_inf_.GetLayerDesc().get_size()
+                          + fwd_inf_.GetIterDesc().get_size()
+                          + fwd_inf_.GetProjDesc().get_size();
+      return size;
+    }
   const MKLDNNRnnLayerParam &GetParam() const { return param_; }
 
   const mkldnn_args_map_t &GetArgsMap() const { return net_args_; }
@@ -226,6 +235,7 @@ class MKLDNNRnnForward {
   void Reset() { initialized_ = false; }
 
  private:
+  Context ctx_;
   bool initialized_;
   MKLDNNRnnLayerParam param_;
   RnnPrimitive fwd_inf_;    // forward inference primitive
@@ -236,6 +246,7 @@ class MKLDNNRnnForward {
 
   mkldnn::memory *weights_layer_r_ = nullptr;
   mkldnn::memory *weights_iter_r_ = nullptr;
+  mkldnn::memory *weights_proj_r_ = nullptr;
 
   /*
    * net_args must contain some keys as below:
@@ -432,9 +443,20 @@ class MKLDNNRnnOp {
   // Used to store the intermediate results of multi-layer
   std::vector<mkldnn::memory *> dst_;
 
+  // Used to store intermediate state result for bfloat
+  mkldnn_shared_mem_t stateout_tmp_mem;
+
   // Used to store the intermediate diff_src of multi_layer
   mkldnn_shared_mem_t diff_src;
 
+  // Used to store intermediate gradient
+  // - for bfloat it's mkldnn memory
+  // - for float it's using output array ptr
+  std::unique_ptr<mkldnn::memory> diff_state_calc_mem;
+  std::unique_ptr<mkldnn::memory> diff_input_calc_mem;
+  std::unique_ptr<mkldnn::memory> diff_output_calc_mem;
+  std::unique_ptr<mkldnn::memory> diff_stateout_calc_mem;
+  
   void Init(const OpContext &ctx,
             const std::vector<NDArray> &inputs,
             const std::vector<OpReqType> &req,
@@ -442,7 +464,8 @@ class MKLDNNRnnOp {
 };
 
 inline bool SupportMKLDNNRnn(const int input_dtype) {
-  if (input_dtype == mshadow::kFloat32 && dmlc::GetEnv("MXNET_USE_MKLDNN_RNN", 1)) {
+  if ((input_dtype == mshadow::kFloat32 || input_dtype == mshadow::kBfloat16)
+      && dmlc::GetEnv("MXNET_USE_MKLDNN_RNN", 1)) {
     return true;
   }
   return false;
