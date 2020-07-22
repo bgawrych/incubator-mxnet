@@ -199,9 +199,9 @@ RnnPrimitive GetRnnFwdPrim(
   switch (mode) {
     case rnn_enum::kLstm:
       fwd = RnnPrimitive::Create<lstm_forward>(prop, mkldnn_rnn_direction,
-          src_layer_desc, src_state_desc, src_state_desc, weight_layer_desc,
+          src_layer_desc, src_state_desc, src_cell_desc, weight_layer_desc,
           weight_iter_desc, bias_desc, dst_layer_desc, dst_state_desc,
-          dst_state_desc);
+          dst_cell_desc);
       break;
     case rnn_enum::kGru:
       fwd = RnnPrimitive::Create<lbr_gru_forward>(prop, mkldnn_rnn_direction,
@@ -1144,7 +1144,7 @@ void MKLDNNRnnOp::Forward(const OpContext &ctx,
     src_state_cell = static_cast<char *>(inputs[rnn_enum::kStateCell].data().dptr_);
     if (default_param.state_outputs && req[rnn_enum::kStateCellOut] != kNullOp) {
       statecellout_mem = CreateMKLDNNMem(
-          outputs[rnn_enum::kStateCellOut], state_desc, req[rnn_enum::kStateCellOut]);
+          outputs[rnn_enum::kStateCellOut], cell_desc, req[rnn_enum::kStateCellOut]);
       dst_state_cell = static_cast<char *>(statecellout_mem.second->get_data_handle());
     }
   }

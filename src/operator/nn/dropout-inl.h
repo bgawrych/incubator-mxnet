@@ -504,7 +504,7 @@ void DropoutCompute(const OpStatePtr& state,
                     const std::vector<TBlob>& inputs,
                     const std::vector<OpReqType>& req,
                     const std::vector<TBlob>& outputs) {
-  MSHADOW_REAL_TYPE_SWITCH(inputs[0].type_flag_, DType, {
+  MSHADOW_REAL_TYPE_SWITCH_BF(inputs[0].type_flag_, DType, {
     DropoutOp<xpu, DType>& op = state.get_state<DropoutOp<xpu, DType>>();
     op.Forward(ctx, inputs, req, outputs);
   });

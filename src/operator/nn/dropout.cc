@@ -37,7 +37,7 @@ OpStatePtr CreateDropoutState(const nnvm::NodeAttrs &attrs,
                                      const std::vector<int> &in_types) {
   const auto& param = nnvm::get<DropoutParam>(attrs.parsed);
   OpStatePtr state;
-  MSHADOW_REAL_TYPE_SWITCH(in_types[dropout::kData], DType, {
+  MSHADOW_REAL_TYPE_SWITCH_BF(in_types[dropout::kData], DType, {
     if (ctx.dev_type == kGPU) {
       state = OpStatePtr::Create<DropoutOp<mxnet::gpu, DType>>(param, ctx);
     } else {

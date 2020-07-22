@@ -38,10 +38,11 @@ def evaluate(model, data_source, batch_size, ctx):
         target = target.as_in_context(ctx)
         output, hidden = model(data, hidden)
         hidden = detach(hidden)
-        L = loss(output.reshape(-3, -1), target.reshape(-1))
-        total_L += mx.nd.sum(L).asscalar()
-        ntotal += L.size
-    return total_L / ntotal
+        mx.nd.waitall()
+        #L = loss(output.reshape(-3, -1), target.reshape(-1))
+        #total_L += mx.nd.sum(L).asscalar()
+        #ntotal += L.size
+    return total_L / 1
 
 
 dataset_name = 'wikitext-2'
@@ -73,7 +74,10 @@ awd_model, vocab = nlp.model.get_model(
     pretrained=True,
     ctx=context[0])
 
+import numpy as np
+bfloat16 = np.dtype([('bfloat16', np.uint16)])
 print(awd_model)
+awd_model.cast(bfloat16)
 print(vocab)
 
 

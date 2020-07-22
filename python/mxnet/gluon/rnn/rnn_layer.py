@@ -183,9 +183,24 @@ class _RNNLayer(HybridBlock):
 
         return stack
 
+
     def cast(self, dtype):
         super(_RNNLayer, self).cast(dtype)
         self._dtype = dtype
+        import numpy as np
+        if np.dtype(dtype) == np.dtype([('bfloat16', np.uint16)]):
+            # correct BatchNorm types back to float32 due to its special requirement
+            #print(self.params)
+            #xd = self.params.keys()
+            #print(xd)
+            for x in self.params:
+                c = self.params[x]
+                c.cast('float32')
+                #print(c)
+             #   self.params.get(name).cast('float32')
+            #print(self.params)
+            #p = self.params.get(name, shape=shape, init=init,
+            #                allow_deferred_init=True, dtype=dtype)
 
     def begin_state(self, batch_size=0, func=ndarray.zeros, **kwargs):
         """Initial state for this cell.
@@ -215,6 +230,7 @@ class _RNNLayer(HybridBlock):
         """
         states = []
         for i, info in enumerate(self.state_info(batch_size)):
+            #print(i, info)
             if info is not None:
                 info.update(kwargs)
             else:
@@ -520,16 +536,18 @@ class LSTM(_RNNLayer):
                                    dtype, **kwargs)
 
     def state_info(self, batch_size=0):
+        import numpy as np
         if self._projection_size is None:
+            state_cell_dtype = self._dtype if self._dtype != np.dtype([('bfloat16', np.uint16)]) else 'float32'
             return [{'shape': (self._num_layers * self._dir, batch_size, self._hidden_size),
                      '__layout__': 'LNC', 'dtype': self._dtype},
                     {'shape': (self._num_layers * self._dir, batch_size, self._hidden_size),
-                     '__layout__': 'LNC', 'dtype': self._dtype}]
+                     '__layout__': 'LNC', 'dtype': state_cell_dtype}]
         else:
             return [{'shape': (self._num_layers * self._dir, batch_size, self._projection_size),
                      '__layout__': 'LNC', 'dtype': self._dtype},
                     {'shape': (self._num_layers * self._dir, batch_size, self._hidden_size),
-                     '__layout__': 'LNC', 'dtype': self._dtype}]
+                     '__layout__': 'LNC', 'dtype': state_cell_dtype}]
 
 
 class GRU(_RNNLayer):
