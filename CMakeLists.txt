@@ -1,12 +1,20 @@
 cmake_minimum_required(VERSION 3.13)
 
+file(READ "include/mxnet/base.h" ver)
+string(REGEX MATCH "MXNET_MAJOR ([0-9]*)" _ ${ver})
+set(ver_major ${CMAKE_MATCH_1})
+string(REGEX MATCH "MXNET_MINOR ([0-9]*)" _ ${ver})
+set(ver_minor ${CMAKE_MATCH_1})
+string(REGEX MATCH "MXNET_PATCH ([0-9]*)" _ ${ver})
+set(ver_patch ${CMAKE_MATCH_1})
+
 # workaround to store CMAKE_CROSSCOMPILING because is getting reset by the project command
 if(CMAKE_CROSSCOMPILING)
   set(__CMAKE_CROSSCOMPILING ${CMAKE_CROSSCOMPILING})
   set(__CMAKE_CROSSCOMPILING_OVERRIDE ON)
 endif()
 
-project(mxnet C CXX)
+project(mxnet VERSION ${ver_major}.${ver_minor}.${ver_patch} LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS ON)  # GNU extensions used by src/operator/random/shuffle_op.cc
@@ -89,7 +97,6 @@ cmake_dependent_option(ENABLE_TESTCOVERAGE "Enable compilation with test coverag
 option(USE_INT64_TENSOR_SIZE "Use int64_t to represent the total number of elements in a tensor" OFF)
 option(BUILD_CYTHON_MODULES "Build cython modules." OFF)
 option(LOG_FATAL_THROW "Log exceptions but do not abort" ON)
-option(USE_CXX11_ABI "Build with GLIBCXX_USE_CXX11_ABI" ON)
 cmake_dependent_option(USE_SPLIT_ARCH_DLL "Build a separate DLL for each Cuda arch (Windows only)." ON "MSVC" OFF)
 cmake_dependent_option(USE_CCACHE "Attempt using CCache to wrap the compilation" ON "UNIX" OFF)
 
@@ -100,18 +107,10 @@ message(STATUS "CMAKE_SYSTEM_PROCESSOR ${CMAKE_SYSTEM_PROCESSOR}")
 
 message(STATUS "CMAKE_SYSTEM_NAME ${CMAKE_SYSTEM_NAME}")
 
-if(USE_CXX11_ABI)
-  add_definitions(-D_GLIBCXX_USE_CXX11_ABI=1)
-else()
-  add_definitions(-D_GLIBCXX_USE_CXX11_ABI=0)
-endif()
-
 if(USE_TVM_OP)
   add_definitions(-DMXNET_USE_TVM_OP=1)
 endif()
 
-message(STATUS "CMake version '${CMAKE_VERSION}' using generator '${CMAKE_GENERATOR}'")
-project(mxnet C CXX)
 if(USE_CUDA)
   cmake_minimum_required(VERSION 3.13.2)  # CUDA 10 (Turing) detection available starting 3.13.2
   include(CheckLanguage)
@@ -714,6 +713,7 @@ elseif(MSVC)
     target_link_libraries(mxnet PUBLIC mshadow)
   endif()
 endif()
+set_target_properties(mxnet PROPERTIES VERSION ${PROJECT_VERSION} SOVERSION ${PROJECT_VERSION_MAJOR})
 target_compile_definitions(mxnet PUBLIC DMLC_LOG_FATAL_THROW=$<BOOL:${LOG_FATAL_THROW}>)
 
 # extension libraries (custom operators, custom subgraphs) are built by default
