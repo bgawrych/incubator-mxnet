@@ -206,7 +206,7 @@ void SpatialUpSamplingBilinearUpdateGradInput(mshadow::Stream<cpu> *s,
 }
 
 DMLC_REGISTER_PARAMETER(BilinearSampleParam);
-
+//Tutaj???
 NNVM_REGISTER_OP(_contrib_BilinearResize2D)
 .describe(R"code(
 Perform 2D resizing (upsampling or downsampling) for 4D input using bilinear interpolation.

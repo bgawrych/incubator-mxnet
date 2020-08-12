@@ -142,6 +142,13 @@ void MKLDNNReshapeForward(const nnvm::NodeAttrs& attrs,
                           const NDArray &input,
                           const OpReqType &req,
                           const NDArray &output);
+
+
+void MKLDNNLUpSamplingForward(const nnvm::NodeAttrs& attrs,
+                              const OpContext &ctx,
+                              const NDArray &in_data,
+                              const OpReqType &req,
+                              const NDArray &out_data);
 }  // namespace op
 }  // namespace mxnet
 

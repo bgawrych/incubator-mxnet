@@ -82,6 +82,15 @@ struct UpSamplingParam : public dmlc::Parameter<UpSamplingParam> {
     DMLC_DECLARE_FIELD(workspace).set_default(512).set_range(0, 8192)
     .describe("Tmp workspace for deconvolution (MB)");
   }
+
+    bool operator==(const UpSamplingParam& other) const {
+    return this->scale == other.scale &&
+           this->num_filter == other.num_filter &&
+           this->sample_type == other.sample_type &&
+           this->num_args == other.num_args &&
+           this->multi_input_mode == other.multi_input_mode &&
+           this->workspace == other.workspace;
+  }
 };  // struct UpSamplingParam
 
 template<typename xpu, typename DType>
@@ -228,5 +237,20 @@ void UpSamplingGradCompute(const nnvm::NodeAttrs& attrs,
 
 }  // namespace op
 }  // namespace mxnet
+
+namespace std {
+template<>
+struct hash<mxnet::op::UpSamplingParam> {
+  size_t operator()(const mxnet::op::UpSamplingParam& val) {
+    size_t ret = 0;
+    ret = dmlc::HashCombine(ret, val.scale);
+    ret = dmlc::HashCombine(ret, val.num_filter);
+    ret = dmlc::HashCombine(ret, val.sample_type);
+    ret = dmlc::HashCombine(ret, val.num_args);
+    ret = dmlc::HashCombine(ret, val.multi_input_mode);
+    return ret;
+  }
+};
+}  // namespace std
 
 #endif  // MXNET_OPERATOR_NN_UPSAMPLING_INL_H_
