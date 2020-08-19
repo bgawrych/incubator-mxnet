@@ -25,6 +25,7 @@
 #if MXNET_USE_MKLDNN == 1
 
 #include "../deconvolution-inl.h"
+#include "../upsampling-inl.h"
 #include "./mkldnn_base-inl.h"
 #include "./mkldnn_ops-inl.h"
 
@@ -256,7 +257,8 @@ static void MKLDNNDeconvFwdBiasPostProcess(
 
 MKLDNNDeconvForward &GetDeconvFwd(const nnvm::NodeAttrs &attrs,
                                   const NDArray &data, const NDArray &weights,
-                                  const NDArray *bias, const NDArray &output) {
+                                  const NDArray *bias, const NDArray &output,
+                                  const DeconvolutionParam &param) {
 #if DMLC_CXX11_THREAD_LOCAL
   static thread_local std::unordered_map<DeconvSignature, MKLDNNDeconvForward,
                                          OpHash>
@@ -266,7 +268,6 @@ MKLDNNDeconvForward &GetDeconvFwd(const nnvm::NodeAttrs &attrs,
       std::unordered_map<DeconvSignature, MKLDNNDeconvForward, OpHash>
           fwds;
 #endif
-  const DeconvolutionParam &param = nnvm::get<DeconvolutionParam>(attrs.parsed);
   DeconvSignature key(param);
   // Here we can sign the conv op with NDArray because conv primitive will
   // decide the right layout for the, so we only need to get the shape and the
@@ -285,20 +286,19 @@ MKLDNNDeconvForward &GetDeconvFwd(const nnvm::NodeAttrs &attrs,
   return it->second;
 }
 
-void MKLDNNDeconvolutionForward(const nnvm::NodeAttrs &attrs,
+void _MKLDNNDeconvolutionForward(const nnvm::NodeAttrs &attrs,
                                 const OpContext &ctx,
                                 const std::vector<NDArray> &in_data,
                                 const std::vector<OpReqType> &req,
-                                const std::vector<NDArray> &out_data) {
+                                const std::vector<NDArray> &out_data,
+                                const DeconvolutionParam &param) {
   TmpMemMgr::Get()->Init(ctx.requested[deconv::kTempSpace]);
-  const DeconvolutionParam &param = nnvm::get<DeconvolutionParam>(attrs.parsed);
-
   auto &data = in_data[deconv::kData];
   auto &weight = in_data[deconv::kWeight];
   const NDArray *bias = param.no_bias ? nullptr : &in_data[deconv::kBias];
 
   MKLDNNDeconvForward &fwd =
-      GetDeconvFwd(attrs, data, weight, bias, out_data[deconv::kOut]);
+      GetDeconvFwd(attrs, data, weight, bias, out_data[deconv::kOut], param);
 
   auto data_mem = data.GetMKLDNNDataReorder(fwd.GetPd().diff_dst_desc());
   const mkldnn::memory *weight_mem;
@@ -340,6 +340,26 @@ void MKLDNNDeconvolutionForward(const nnvm::NodeAttrs &attrs,
   MKLDNNStream::Get()->Submit();
 
   MKLDNNDeconvFwdBiasPostProcess(param, ctx, *bias, out_data);
+}
+
+void MKLDNNDeconvolutionUpSampleForward(const nnvm::NodeAttrs &attrs,
+                                        const OpContext &ctx,
+                                        const std::vector<NDArray> &in_data,
+                                        const std::vector<OpReqType> &req,
+                                        const std::vector<NDArray> &out_data) {
+                                   
+  const UpSamplingParam& param = nnvm::get<UpSamplingParam>(attrs.parsed);
+  DeconvolutionParam deconv_param = GetDeconvolutionParam(param);
+  _MKLDNNDeconvolutionForward(attrs, ctx, in_data, req, out_data, deconv_param);
+}
+void MKLDNNDeconvolutionForward(const nnvm::NodeAttrs &attrs,
+                                const OpContext &ctx,
+                                const std::vector<NDArray> &in_data,
+                                const std::vector<OpReqType> &req,
+                                const std::vector<NDArray> &out_data) {
+                                   
+  const DeconvolutionParam &param = nnvm::get<DeconvolutionParam>(attrs.parsed);
+  _MKLDNNDeconvolutionForward(attrs, ctx, in_data, req, out_data, param);
 }
 
 class MKLDNNDeconvBackwardData {

@@ -71,6 +71,11 @@ void MKLDNNDeconvolutionBackward(const nnvm::NodeAttrs& attrs, const OpContext &
                                  const std::vector<NDArray>& inputs,
                                  const std::vector<OpReqType>& req,
                                  const std::vector<NDArray>& outputs);
+/* For bilinear upsampling */
+void MKLDNNDeconvolutionUpSampleForward(const nnvm::NodeAttrs& attrs, const OpContext &ctx,
+                                const std::vector<NDArray> &in_data,
+                                const std::vector<OpReqType> &req,
+                                const std::vector<NDArray> &out_data);
 
 /* For activation */
 void MKLDNNActivationForward(const nnvm::NodeAttrs& attrs, const OpContext &ctx,
@@ -142,6 +147,12 @@ void MKLDNNReshapeForward(const nnvm::NodeAttrs& attrs,
                           const NDArray &input,
                           const OpReqType &req,
                           const NDArray &output);
+
+void MKLDNNLUpSamplingForward(const nnvm::NodeAttrs& attrs,
+                              const OpContext &ctx,
+                              const std::vector<NDArray> &in_data,
+                              const std::vector<OpReqType> &req,
+                              const std::vector<NDArray> &out_data);
 }  // namespace op
 }  // namespace mxnet
 

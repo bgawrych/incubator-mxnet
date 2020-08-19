@@ -27,9 +27,37 @@
 #include "./upsampling-inl.h"
 #include <nnvm/op_attr_types.h>
 #include "./deconvolution-inl.h"
+#if MXNET_USE_MKLDNN == 1
+#include "./mkldnn/mkldnn_base-inl.h"
+#include "./mkldnn/mkldnn_ops-inl.h"
+#endif
 
 namespace mxnet {
 namespace op {
+DMLC_REGISTER_PARAMETER(UpSamplingParam);
+
+#if MXNET_USE_MKLDNN == 1
+static void UpSamplingComputeExCPU(const nnvm::NodeAttrs& attrs,
+                                   const OpContext& ctx,
+                                   const std::vector<NDArray>& inputs,
+                                   const std::vector<OpReqType>& req,
+                                   const std::vector<NDArray>& outputs) {
+  const UpSamplingParam& param_ = nnvm::get<UpSamplingParam>(attrs.parsed);
+  if (SupportMKLDNNUpSampling(param_, inputs, outputs[0])) {
+    mxnet::FComputeEx mkldnn_fn = (param_.sample_type == up_enum::kNearest)
+                    ? MKLDNNLUpSamplingForward
+                    : MKLDNNDeconvolutionUpSampleForward;
+
+      MKLDNN_OPCHECK_INIT(false, outputs.size(), inputs, outputs);
+      MKLDNNRun(mkldnn_fn, attrs, ctx, inputs, req, outputs);
+      auto fn = UpSamplingCompute<cpu>;
+      MKLDNN_OPCHECK_RUN(fn, attrs, ctx, inputs, req, outputs);
+    return;
+  }
+  FallBackCompute(UpSamplingCompute<cpu>, attrs, ctx, inputs, req, outputs);
+}
+
+#endif
 
 static bool UpSamplingShape(const nnvm::NodeAttrs& attrs,
                             mxnet::ShapeVector *in_shape, mxnet::ShapeVector *out_shape) {
@@ -104,6 +132,22 @@ static bool UpSamplingType(const nnvm::NodeAttrs& attrs,
   return true;
 }
 
+inline static bool UpSamplingStorageType(const nnvm::NodeAttrs& attrs,
+                                         const int dev_mask,
+                                         DispatchMode* dispatch_mode,
+                                         std::vector<int> *in_attrs,
+                                         std::vector<int> *out_attrs) {
+  const UpSamplingParam& param_ = nnvm::get<UpSamplingParam>(attrs.parsed);
+  if (param_.sample_type == up_enum::kNearest) {
+    CHECK_EQ(in_attrs->size(),  1U);
+  }
+  else {
+    //Bilinear Upsampling requiers input data and kernel
+    CHECK_EQ(in_attrs->size(),  2U);
+  }
+  return MKLDNNStorageType(attrs, dev_mask, true, dispatch_mode, in_attrs, out_attrs);
+}
+
 struct UpSamplingGrad {
   const char *op_name;
   std::vector<nnvm::NodeEntry> operator()(const nnvm::ObjectPtr& n,
@@ -117,8 +161,6 @@ struct UpSamplingGrad {
     return MakeGradNode(op_name, n, heads, n->attrs.dict);
   }
 };
-
-DMLC_REGISTER_PARAMETER(UpSamplingParam);
 
 NNVM_REGISTER_OP(UpSampling)
 .describe(R"code(Upsamples the given input data.
@@ -197,6 +239,11 @@ Example::
 })
 .set_attr<THasDeterministicOutput>("THasDeterministicOutput", true)
 .set_attr<FCompute>("FCompute<cpu>", UpSamplingCompute<cpu>)
+#if MXNET_USE_MKLDNN == 1
+.set_attr<bool>("TIsMKLDNN", true)
+.set_attr<FComputeEx>("FComputeEx<cpu>", UpSamplingComputeExCPU)
+.set_attr<FInferStorageType>("FInferStorageType", UpSamplingStorageType)
+#endif
 .set_attr<nnvm::FGradient>("FGradient", UpSamplingGrad{"_backward_UpSampling"})
 .set_attr<std::string>("key_var_num_args", "num_args")
 .add_argument("data", "NDArray-or-Symbol[]", "Array of tensors to upsample. "
