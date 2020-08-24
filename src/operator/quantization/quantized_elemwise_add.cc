@@ -60,6 +60,7 @@ static bool ElemwiseAddType(const nnvm::NodeAttrs& attrs,
   // A, B
   const int elem_add_num = 2;
   for (int i = 0; i < elem_add_num; ++i) {
+    LOG(INFO) << i << " " << in_type->at(i);
     if (in_type->at(i) == mshadow::kInt8) {
       TYPE_ASSIGN_CHECK(*in_type, i, mshadow::kInt8);
     } else {
