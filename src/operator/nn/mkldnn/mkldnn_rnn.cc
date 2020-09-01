@@ -765,6 +765,7 @@ void MKLDNNRnnBackward::FetchDataWeightsMem(const MKLDNNRnnForwardTraining& fwd)
         if (bwd_.weights_layer_desc_ == fwd.fwd_trn_.GetLayerDesc()) {
           this->weights_layer_->set_data_handle(kv.second.get_data_handle());
         } else {
+          //sprwadz
           MKLDNNMemoryReorder(*fwd.weights_layer_, *this->weights_layer_);
         }
         valid_mem = this->weights_layer_.get();
@@ -787,7 +788,6 @@ void MKLDNNRnnBackward::FetchDataWeightsMem(const MKLDNNRnnForwardTraining& fwd)
 
 void MKLDNNRnnBackward::SetWeightsGradsMem() {
   using tag = mkldnn::memory::format_tag;
-
   if (this->diff_weights_layer_ == nullptr
       || this->diff_weights_iter_ == nullptr
       || this->diff_bias_ == nullptr) {
@@ -804,14 +804,16 @@ void MKLDNNRnnBackward::SetWeightsGradsMem() {
     this->diff_weights_iter_r_ = std::make_shared<mkldnn::memory>(
         native_iter_desc, cpu_engine);
 
-    if (native_layer_desc == bwd_.diff_weights_layer_desc_) {
+    if (native_layer_desc == bwd_.diff_weights_layer_desc_ &&
+        native_layer_desc.get_size() >= bwd_.diff_weights_layer_desc_.get_size()) {
       this->diff_weights_layer_ = std::make_shared<mkldnn::memory>(
           bwd_.diff_weights_layer_desc_, cpu_engine, diff_weights_layer_r_->get_data_handle());
     } else {
       this->diff_weights_layer_ = std::make_shared<mkldnn::memory>(
           bwd_.diff_weights_layer_desc_, cpu_engine);
     }
-    if (native_iter_desc == bwd_.diff_weights_iter_desc_) {
+    if (native_iter_desc == bwd_.diff_weights_iter_desc_ &&
+        native_iter_desc.get_size() >= bwd_.diff_weights_iter_desc_.get_size()) {
       this->diff_weights_iter_ = std::make_shared<mkldnn::memory>(
           bwd_.diff_weights_iter_desc_, cpu_engine, diff_weights_iter_r_->get_data_handle());
     } else {
