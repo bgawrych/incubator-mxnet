@@ -218,8 +218,8 @@ class _LayerOutputMinMaxCollector(object):
         if name not in self.include_layer:
             return
         arr = arr.copyto(cpu()).asnumpy()
-        min_range = ndarray.min(arr).asscalar()
-        max_range = ndarray.max(arr).asscalar()
+        min_range = np.min(arr)
+        max_range = np.max(arr)
         if name in self.min_max_dict:
             cur_min_max = self.min_max_dict[name]
             self.min_max_dict[name] = (min(cur_min_max[0], min_range),
@@ -804,7 +804,6 @@ def calib_graph(qsym, arg_params, aux_params, collector,
                 logger.info('Calculating optimal thresholds for quantization')
             th_dict = _get_optimal_thresholds(
                 collector.hist_dict, quantized_dtype, logger=logger)
-            print(th_dict)
         elif calib_mode == 'naive':
             th_dict = collector.min_max_dict
         elif calib_mode == 'customize':
