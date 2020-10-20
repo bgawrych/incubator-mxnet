@@ -142,7 +142,7 @@ def check_quantize(sym, data_shape, out_type, name='conv',
 
   if name in config:
     name = config[name][OP_NAME]
-  sym_sg = sym.optimize_for(QUANTIZE_SG_PASS_NAME, dedup_subgraph=False, skip_infer=True)
+  sym_sg = sym.optimize_for(QUANTIZE_SG_PASS_NAME, dedup_subgraph=True, skip_infer=True)
 
   inputs = mx.sym.var('data', dtype='float32')
   sym_block = mx.gluon.SymbolBlock(sym, inputs)
@@ -175,7 +175,7 @@ def check_quantize(sym, data_shape, out_type, name='conv',
                                                                     num_calib_examples=1,
                                                                     quantize_mode='full',
                                                                     quantize_granularity=quantize_granularity)
-    qsym = qsym.optimize_for(QUANTIZE_SG_PASS_NAME, dedup_subgraph=False, skip_infer=True)
+    qsym = qsym.optimize_for(QUANTIZE_SG_PASS_NAME, dedup_subgraph=True, skip_infer=True)
     if check_calibration:
       check_qsym_calibrated(qsym, out_type, name=name)
     if check_scale_align:
@@ -237,7 +237,7 @@ def check_fusion(sym, data_shape, attrs_dict, check_fp32_fusion=True, check_quan
       check_quantization = False
       data_min = 0
 
-    sym_sg = sym.optimize_for(SG_PASS_NAME, dedup_subgraph=False, skip_infer=True)
+    sym_sg = sym.optimize_for(SG_PASS_NAME, dedup_subgraph=True, skip_infer=True)
     for name, attrs in attrs_dict.items():
       if name in config:
         op_name = config[name][OP_NAME]

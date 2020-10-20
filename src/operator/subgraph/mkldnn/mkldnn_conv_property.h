@@ -259,13 +259,24 @@ class SgMKLDNNConvProperty : public SubgraphProperty {
       std::vector<nnvm::NodeEntry> *orig_input_entries) const override {
     auto sym = n->attrs.subgraphs[0];
     std::unordered_set<const nnvm::Node *> node_sets;
+    nnvm::Node *conv_input;
     DFSVisit(sym->outputs, [&](const nnvm::ObjectPtr &node) {
       if (node->is_variable()) return;
       node_sets.insert(node.get());
+      LOG(INFO) << node->op()->name;
+        conv_input = node->inputs[0].node.get();
+      }
       if (node->op()->name == "elemwise_add") {
         // Make sure n is the left operand of sum, if not,
         // switch sum operands sequence to ensure that
         // the extra sum operand stays in the last of inputs.
+        if(dedup_subgraph && 
+          (conv_input == node->inputs[1].node.get() ||
+           conv_input == node->inputs[0].node.get())) {
+            n->attrs.dict["dedup"] = "true";
+            n->op()->attr_parser(&(n->attrs));
+            return;
+          }
         if (node_sets.count(node->inputs[1].node.get())) {
           auto tmp = node->inputs[1];
           node->inputs[1] = node->inputs[0];
