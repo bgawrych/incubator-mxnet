@@ -44,6 +44,7 @@ struct MKLDNNFCParam: public dmlc::Parameter<MKLDNNFCParam> {
   dmlc::optional<float> min_calib_range;  // min float value calculated from calibration dataset
   dmlc::optional<float> max_calib_range;  // max float value calculated from calibration dataset
   dmlc::optional<bool> channel_wise_quantize;
+  dmlc::optional<int> quantize_shift;  // shifted zero for uint8 quantization
 
   DMLC_DECLARE_PARAMETER(MKLDNNFCParam) {
     DMLC_DECLARE_FIELD(quantized).set_default(false)
@@ -65,6 +66,11 @@ struct MKLDNNFCParam: public dmlc::Parameter<MKLDNNFCParam> {
     DMLC_DECLARE_FIELD(channel_wise_quantize)
     .set_default(dmlc::optional<bool>())
     .describe("Whether support channel-wise-quantize for weight.");
+    DMLC_DECLARE_FIELD(quantize_shift)
+        .set_default(dmlc::optional<int>())
+        .describe(
+            "Shifted zero for uint8 quantization of negative and positive "
+            "values. If not specified, uint8 can only quantize positive values.");
   }
 };
 
