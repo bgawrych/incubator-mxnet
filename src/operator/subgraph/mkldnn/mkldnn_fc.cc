@@ -211,9 +211,7 @@ void SgMKLDNNFCOp::Forward(const OpContext &ctx,
     bool support_channelwise_scale = false;
     if (mkldnn_param.quantized) {
       CHECK(data.dtype() == mshadow::kInt8 || data.dtype() == mshadow::kUint8);
-      data_scale_ = GetQuantizeScale(
-          mkldnn_param.quantize_shift.has_value() ? mshadow::kInt8 : data.dtype(),
-          cached_min_data_, cached_max_data_);
+      data_scale_ = GetQuantizeScale(data.dtype(), cached_min_data_, cached_max_data_);
 
       bool fuse_requantize = false;
       // Channelwise scaling is only supported when fusion is enabled (requantize or dequantize).
@@ -277,35 +275,9 @@ void SgMKLDNNFCOp::Forward(const OpContext &ctx,
           int8_t *bias_ptr = bias.data().dptr<int8_t>();
           int32_t *quantized_bias_ptr = cached_bias_.data().dptr<int32_t>();
           size_t bias_size = bias.shape().Size();
-          if (mkldnn_param.quantize_shift.has_value() && data.dtype() == mshadow::kUint8) {
-            dnnl_dim_t M = cached_weight_.shape()[0];  // oc
-            dnnl_dim_t K = cached_weight_.shape()[1];  // ic
-            dnnl_dim_t N = 1;
-            NDArray shift_matrix(bias.storage_type(), {K, N}, bias.ctx(), false,
-                                 mshadow::kInt8);
-            std::fill_n(shift_matrix.data().dptr<int8_t>(), K * N,
-                        static_cast<int8_t>(mkldnn_param.quantize_shift.value()));
-            const int32_t offsetc[]={0};
-            NDArray shift_compensation =
-                NDArray(bias.storage_type(), {M, N}, bias.ctx(), false, mshadow::kInt32);
-            int32_t *shift_compensation_ptr = shift_compensation.data().dptr<int32_t>();
-            dnnl_status_t gemm_status = dnnl_gemm_s8s8s32('N', 'N', 'F', M, N, K, 1,
-                              cached_weight_.data().dptr<int8_t>(), K, 0,
-                              shift_matrix.data().dptr<int8_t>(), N, 0, 1,
-                              shift_compensation.data().dptr<int32_t>(), N, offsetc);
-            if (gemm_status != dnnl_success) {
-              throw std::runtime_error("Gemm returned exit status code "+gemm_status);
-            }
-            #pragma omp parallel for num_threads(nthreads)
-            for (index_t i = 0; i < static_cast<index_t>(bias_size); ++i) {
-              quantized_bias_ptr[i] =
-                  std::round(bias_ptr[i] * bias_int32_rescale - shift_compensation_ptr[i]);
-            }
-          } else {
-            #pragma omp parallel for num_threads(nthreads)
-            for (index_t i = 0; i < static_cast<index_t>(bias_size); ++i) {
-              quantized_bias_ptr[i] = std::round(bias_ptr[i] * bias_int32_rescale);
-            }
+          #pragma omp parallel for num_threads(nthreads)
+          for (index_t i = 0; i < static_cast<index_t>(bias_size); ++i) {
+            quantized_bias_ptr[i] = std::round(bias_ptr[i] * bias_int32_rescale);
           }
         }
       }
