@@ -114,7 +114,8 @@ class SgMKLDNNFCPostQuantizeSelector : public SubgraphSelector {
             return true;
         }
       case kLeakyRelu:
-        if ((new_node.op() == Op::Get("LeakyReLU")) && status == kLeakyRelu) {
+        if ((new_node.op() == Op::Get("LeakyReLU")) && status == kLeakyRelu &&
+            !dmlc::GetEnv("MXNET_DISABLE_ONEDNN_BRGEMM_FC", false)) {
             matched_list.push_back(&new_node);
             status = kQuantizeAgain;
             return true;
