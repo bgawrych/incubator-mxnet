@@ -204,7 +204,8 @@ void MKLDNNInterleavedMatMulSelfAttQKOp::Forward(
       args_[DNNL_ARG_ATTR_MULTIPLE_POST_OP(0) | DNNL_ARG_SRC_1] = *cached_mask_mem_;
 
       dnnl::post_ops post_op;
-      post_op.append_binary(dnnl::algorithm::binary_add, dst_md);
+      auto mask_md = dnnl::memory::desc({dst_dims[0], 1, dst_dims[2]}, dnnl::memory::data_type::f32, dnnl::memory::format_tag::abc);
+      post_op.append_binary(dnnl::algorithm::binary_add, mask_md);
       attr.set_post_ops(post_op);
     }
     attr.set_output_scales(0, {out_scale});
