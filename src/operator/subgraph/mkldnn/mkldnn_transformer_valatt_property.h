@@ -233,7 +233,7 @@ class SgMKLDNNTransformerValAttProperty : public SubgraphProperty {
     n->attrs.name = node_name.str();
     n->attrs.op = Op::Get("sg_mkldnn_selfatt_valatt");
     CHECK(n->attrs.op);
-    n->attrs.subgraphs.emplace_back(std::make_shared<nnvm::Symbol>(new_sym));
+    //n->attrs.subgraphs.emplace_back(std::make_shared<nnvm::Symbol>(new_sym));
     n->op()->attr_parser(&(n->attrs));
     return n;
   }

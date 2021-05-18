@@ -17,6 +17,7 @@
 
 import copy
 import mxnet as mx
+import numpy as np
 import pytest
 from subgraph_common import check_fusion, check_neg_fusion, check_quantize
 from subgraph_common import CustomNormalInit, DATA_SHAPE, RELU6, TailNegBlock
@@ -25,7 +26,6 @@ from mxnet.contrib import quantization
 from mxnet.gluon import nn
 from mxnet.test_utils import assert_almost_equal, assert_almost_equal_with_err
 from mxnet.util import use_np
-from mxnet import np, npx
 import math
 
 @use_np
@@ -54,7 +54,7 @@ def test_self_attention():
         context_vec = F.npx.batch_dot(attn_weights,
                                      F.np.swapaxes(value, 1, 2)).transpose((0, 2, 1, 3))
         context_vec = F.npx.reshape(context_vec, (-2, -2, -1))
-        return context_vec, [scores, attn_weights]
+        return context_vec#, [scores, attn_weights]
 
   batch_size = 24
   seq_length = 384
@@ -65,14 +65,31 @@ def test_self_attention():
   mask = mx.np.random.normal(size=[batch_size, seq_length, seq_length ], dtype='float32')
 
   net.initialize()
-  print(in_data.shape)
+  # print(in_data.shape)
   net.hybridize()
-  ref_ctx_vec, ref_out = net(in_data, mask)
-  net.optimize_for(in_data, mask, backend="MKLDNN")
-  ctx_vec, out = net(in_data, mask)
+  ref_out = net(in_data, mask)
+  # net.optimize_for(in_data, mask, backend="MKLDNN")
+  # out = net(in_data, mask)
 
-  assert_almost_equal(ctx_vec.asnumpy(), ref_ctx_vec.asnumpy())
-  for i in range(len(out)):
-    assert_almost_equal(out[i].asnumpy(), ref_out[i].asnumpy())
-  net.export("CHECK")
-  print(out)
+  # for i in range(len(out)):
+  #   assert_almost_equal(out[i].asnumpy(), ref_out[i].asnumpy())
+  # net.export("CHECK")
+
+  calib_data = mx.gluon.data.DataLoader(mx.gluon.data.ArrayDataset(in_data, mask), batch_size=1)
+  qnet = mx.contrib.quant.quantize_net(net, quantized_dtype='auto',
+                                            exclude_layers=None,
+                                            exclude_layers_match=None,
+                                            calib_data=calib_data,
+                                            calib_mode='naive',
+                                            num_calib_batches=1,
+                                            ctx=mx.current_context())
+  qnet.export("XD")
+  out = qnet(in_data, mask)
+  mx.nd.waitall()
+  print(ref_out.shape)
+  print(out.shape)
+  for i in range(len(ref_out)):
+        min_range = np.min(ref_out[i].asnumpy())
+        max_range = np.max(ref_out[i].asnumpy())
+        atol = 0.1 * max(abs(min_range), abs(max_range))
+        assert_almost_equal_with_err(out.asnumpy(), ref_out.asnumpy(), rtol=0.1, atol=atol, etol=0.2)

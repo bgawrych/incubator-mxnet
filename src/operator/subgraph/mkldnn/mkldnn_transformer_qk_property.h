@@ -198,7 +198,7 @@ class SgMKLDNNTransformerQKProperty : public SubgraphProperty {
     n->attrs.name = node_name.str();
     n->attrs.op = Op::Get("_sg_mkldnn_selfatt_qk");
     CHECK(n->attrs.op);
-    n->attrs.subgraphs.emplace_back(std::make_shared<nnvm::Symbol>(new_sym));
+    //n->attrs.subgraphs.emplace_back(std::make_shared<nnvm::Symbol>(new_sym));
     n->op()->attr_parser(&(n->attrs));
     return n;
   }
@@ -226,6 +226,7 @@ class SgMKLDNNTransformerQKProperty : public SubgraphProperty {
     subgraph_node->inputs.resize(1);
     // split is not part of subgraph, skip split as input and connect subgraph input with split input
     subgraph_node->inputs[0] = orig_input_entries->at(0).node->inputs[0];
+    LOG(INFO) << orig_input_entries->at(0).node->inputs[0].index;
   }
 };
 
