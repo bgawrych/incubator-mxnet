@@ -41,6 +41,10 @@
    custom_op    SwapAxis
         \        /
          batch_dot
+            |
+        transpose
+           |
+        reshape
 */
 
 namespace mxnet {
@@ -77,7 +81,7 @@ bool CheckSplitConditions(const BiDirectedNode& bi_node) {
 }
 
 class SgMKLDNNTransformerValAttSelector : public SubgraphSelectorV2 {
-  enum SelectStatus {
+  enum InStatus {
     kFail = 0,
     kStart,
     kSecondStart,
@@ -86,23 +90,35 @@ class SgMKLDNNTransformerValAttSelector : public SubgraphSelectorV2 {
     kReshape,
     kSuccess
   };
-/*             (custom_op)
-         /---> kSecondStart ---\
-  kStart                        > kSwapAx --> kReshape --> kSuccess
-        \---> kIgnoreSecond ---/
-       (SwapAx recognized tmp
-       state to drop second input)
+  /*                 (custom_op)
+             /---> kSecondStart ---\
+  kStart -->                         > kSwapAx --> kReshape --> kSuccess
+            \---> kIgnoreSecond ---/
+            (SwapAx recognized tmp
+            state to drop second input)
 
   Each status except kStart is connected with kFail
 */
+
+  enum OutStatus {
+    oFail = 0,
+    oStart,
+    oTranspose,
+    oReshape,
+    oSuccess
+  };
+
+
  private:
-  SelectStatus status_;
+  InStatus in_status_;
+  OutStatus out_status_;
   std::vector<const BiDirectedNode *> matched_list_;
 
  public:
   bool Select(const BiDirectedNode& seed_node, const std::shared_ptr<NodeAttr>& node_attr) override {
     if (seed_node.node->op() == Op::Get("batch_dot")) {
-      status_ = kStart;
+      in_status_ = InStatus::kStart;
+      out_status_ = OutStatus::oStart;
       matched_list_.clear();
       matched_list_.push_back(&seed_node);
       return true;
@@ -111,24 +127,24 @@ class SgMKLDNNTransformerValAttSelector : public SubgraphSelectorV2 {
   }
 
   bool SelectInput(const BiDirectedNode &n, const BiDirectedNode &input_node) override {
-    if (status_ == kFail || status_ == kSuccess || input_node.node->is_variable())
+    if (in_status_ == InStatus::kFail || in_status_ == InStatus::kSuccess || input_node.node->is_variable())
       return false;
 
-    switch (status_) {
-      case kStart:
+    switch (in_status_) {
+      case InStatus::kStart:
         if (input_node.node->op() == Op::Get("SwapAxis")) {
-          status_ = kIgnoreSecond;
+          in_status_ = InStatus::kIgnoreSecond;
           matched_list_.push_back(&input_node);
           return true;
         } else {
-          status_ = kSecondStart;
+          in_status_ = InStatus::kSecondStart;
           return false;
         }
         break;
-      case kSecondStart:
+      case InStatus::kSecondStart:
         if (input_node.node->op() == Op::Get("SwapAxis")) {
           if (CheckSwapAxisConditions(input_node)) {
-            status_ = kSwapAx;
+            in_status_ = InStatus::kSwapAx;
             matched_list_.push_back(&input_node);
             return true;
           } else {
@@ -136,10 +152,10 @@ class SgMKLDNNTransformerValAttSelector : public SubgraphSelectorV2 {
           }
         }
         break;
-      case kSwapAx:
+      case InStatus::kSwapAx:
         if (input_node.node->op() == Op::Get("_npx_reshape")) {
           if (CheckReshapeConditions(input_node)) {
-            status_ = kReshape;
+            in_status_ = InStatus::kReshape;
             matched_list_.push_back(&input_node);
             return true;
           } else {
@@ -147,10 +163,10 @@ class SgMKLDNNTransformerValAttSelector : public SubgraphSelectorV2 {
           }
         }
         break;
-      case kReshape:
+      case InStatus::kReshape:
         if (input_node.node->op() == Op::Get("_split_v2")) {
           if (CheckSplitConditions(input_node)) {
-            status_ = kSuccess;
+            in_status_ = InStatus::kSuccess;
             matched_list_.push_back(&input_node);
             return true;
           }
@@ -159,22 +175,62 @@ class SgMKLDNNTransformerValAttSelector : public SubgraphSelectorV2 {
       case kIgnoreSecond:
           LOG(INFO) << "IGNORESECOND! " << input_node.node->op()->name;
         // BFS algorithm - we need to exclude single input of batch_dot (custom_op)
-        status_ = kSwapAx;
+        in_status_ = InStatus::kSwapAx;
         return false;
       default:
-        status_ = kFail;
+        in_status_ = InStatus::kFail;
         return false;
     }
       return false;
   }
 
-  bool SelectOutput(const BiDirectedNode &n, const BiDirectedNode &new_node) override {
+  bool SelectOutput(const BiDirectedNode &n, const BiDirectedNode &output_node) override {
+    if (out_status_ == OutStatus::oFail || out_status_ == OutStatus::oSuccess || output_node.node->is_variable())
+      return false;
+
+    switch (out_status_) {
+      case OutStatus::oStart:
+        if (output_node.node->op() == Op::Get("_npi_transpose")) {
+          auto const &transpose_params = nnvm::get<NumpyTransposeParam>(output_node.node->attrs.parsed);
+          auto axes = transpose_params.axes;
+          // LOG(INFO) << axes.ndim() << " "
+          //           << axes[0] << " "
+          //           << axes[1] << " "
+          //           << axes[2] << " "
+          //           << axes[3] << " ";
+          if (axes.ndim() == 4 && axes[0] == 0 && axes[1] == 2 && axes[2] == 1 && axes[3] == 3) {
+            out_status_ = OutStatus::oTranspose;
+            matched_list_.push_back(&output_node);
+            return true;
+          }
+        }
+      case OutStatus::oTranspose:
+        if (out_status_ == OutStatus::oTranspose && output_node.node->op() == Op::Get("_npx_reshape")) {
+          auto const &reshape_param = nnvm::get<NumpyXReshapeParam>(output_node.node->attrs.parsed);
+          auto newshape = reshape_param.newshape;
+          // LOG(INFO) << newshape.ndim() << " "
+          //           << newshape[0] << " "
+          //           << newshape[1] << " "
+          //           << newshape[2] << " ";
+          if(newshape.ndim() == 3 && (newshape[0] == newshape[1] && newshape[0] == -2) && newshape[2] == -1) {
+            out_status_ = OutStatus::oSuccess;
+            matched_list_.push_back(&output_node);
+            return true;
+          }
+        }
+      default:
+        // LOG(INFO) << output_node.node->attrs.name;
+        out_status_ = OutStatus::oFail;
+        return false;
+    }
+    
     return false;
   }
   
   std::vector<BiDirectedNode *> Filter(const std::vector<BiDirectedNode*>& candidates) override {
-    LOG(INFO) << status_;
-    if (status_ == kFail || status_ != kSuccess) {
+    LOG(INFO) << in_status_;
+    if (in_status_ == InStatus::kFail || in_status_ != InStatus::kSuccess ||
+        out_status_ == OutStatus::oFail || out_status_ != OutStatus::oSuccess) {
       return std::vector<BiDirectedNode *>(0);
     } else {
       std::vector<BiDirectedNode *> ret;
@@ -222,11 +278,17 @@ class SgMKLDNNTransformerValAttProperty : public SubgraphProperty {
     new_sym.outputs.emplace_back(last_node);
     std::ostringstream node_name;
     std::string op_name;
+    // LOG(INFO) << "VALLATT SUBGRAPH";
     DFSVisit(new_sym.outputs, [&](const nnvm::ObjectPtr &node) {
+      // if(node->op()) {
+      //   LOG(INFO) << node->op()->name << " " << node->attrs.name;
+      // } else {
+      //     LOG(INFO) << "VAR " << node->attrs.name;
+      // }
       if((node->op() == Op::Get("_npx_reshape"))) {
-        auto const &reshape_param =
-            nnvm::get<NumpyXReshapeParam>(node->attrs.parsed);
-      n->attrs.dict["heads"] = std::to_string(reshape_param.newshape[2]);
+        auto const &reshape_param = nnvm::get<NumpyXReshapeParam>(node->attrs.parsed);
+        if(reshape_param.newshape.ndim() == 4)
+          n->attrs.dict["heads"] = std::to_string(reshape_param.newshape[2]);
       }
     });
     node_name << "sg_mkldnn_selfatt_valatt_" << subgraph_id;

@@ -395,7 +395,7 @@ static bool SgMKLDNNSelfAttValShape(const NodeAttrs& attrs,
 
     out_shape->resize(3);
     SHAPE_ASSIGN_CHECK(*out_shape, 0,
-      mxnet::TShape({qkv_shape[0], att_shape[1], att_shape[2], qkv_shape[2]/params.heads/3}));
+      mxnet::TShape({att_shape[0], att_shape[2], att_shape[1]*qkv_shape[2]/params.heads/3}));
     if (!params.enable_float_output) {
       SHAPE_ASSIGN_CHECK(*out_shape, 1, mxnet::TShape({1}));      // min output
       SHAPE_ASSIGN_CHECK(*out_shape, 2, mxnet::TShape({1}));      // max output
@@ -410,7 +410,7 @@ static bool SgMKLDNNSelfAttValShape(const NodeAttrs& attrs,
       << "currently is: " << qkv_shape.ndim() << "D";
     out_shape->resize(1);
     SHAPE_ASSIGN_CHECK(*out_shape, 0,
-      mxnet::TShape({att_shape[0], att_shape[1], att_shape[2], qkv_shape[2]/params.heads/3}));
+      mxnet::TShape({att_shape[0], att_shape[2], att_shape[1]*qkv_shape[2]/params.heads/3}));
     return true;
   }
 
@@ -511,10 +511,14 @@ class MKLDNNSelfAttValAttOp {
   bool initialized_{false};
   MKLDNNSelfAttParam param_;
   mkldnn_args_map_t args_;
+  mkldnn_args_map_t reorder_args;
   std::shared_ptr<dnnl::matmul> fwd_;
+  std::shared_ptr<dnnl::reorder> reorder_;
   std::shared_ptr<dnnl::memory> cached_att_mem_;
   std::shared_ptr<dnnl::memory> cached_value_mem_;
   std::shared_ptr<dnnl::memory> cached_out_mem_;
+  std::shared_ptr<dnnl::memory> original;
+  std::shared_ptr<dnnl::memory> tricked;
   float min_qkv_;
   float max_qkv_;
   float min_att_;
@@ -568,9 +572,11 @@ void MKLDNNSelfAttValAttOp::Initialize(const OpContext &ctx,
 
     const auto engine = CpuEngine::Get()->get_engine();
 
-    memory::dims attn_dims     = {sequences, heads, qkv_seq_len, qkv_seq_len};
-    memory::dims value_dims    = {sequences, heads, qkv_seq_len, head_dim};
+    memory::dims attn_dims     = {sequences, heads, qkv_seq_len, qkv_seq_len}; //lhs
+    memory::dims value_dims    = {sequences, heads, qkv_seq_len, head_dim};    //rhs
     memory::dims out_dims      = {sequences, heads, qkv_seq_len, head_dim};
+
+    memory::dims trick_out_dims      = {sequences, heads, qkv_seq_len, head_dim, 1};
 
     memory::dims attn_strides  = {attn_tensor.shape()[1]*attn_tensor.shape()[2]*attn_tensor.shape()[3],
                                   attn_tensor.shape()[2]*attn_tensor.shape()[3],
@@ -582,11 +588,12 @@ void MKLDNNSelfAttValAttOp::Initialize(const OpContext &ctx,
 
     //LOG(INFO) << "X";
     memory::desc out_md;
+    memory::desc trick_md;
+    memory::desc trick_target_md;
 
     float oscale = 1.0f;
     //LOG(INFO) << "X";
     if (param_.quantized) {
-      
       const float min_att = inputs[2].data().dptr<float>()[0];
       const float max_att = inputs[3].data().dptr<float>()[0];
       const float min_qkv = inputs[4].data().dptr<float>()[0];
@@ -603,18 +610,26 @@ void MKLDNNSelfAttValAttOp::Initialize(const OpContext &ctx,
             GetQuantizeScale(out_tensor.dtype(), min_output_, max_output_) /
             (att_scale * qkv_scale);
         out_md = memory::desc(out_dims, memory::data_type::s8, memory::format_tag::abcd);
+        trick_md = memory::desc(trick_out_dims, memory::data_type::s8, memory::format_tag::abcde);
+        trick_target_md = memory::desc(trick_out_dims, memory::data_type::s8, memory::format_tag::acbde);
       } else if (param_.enable_float_output) {
         oscale = 1.0f / (att_scale * qkv_scale);
         out_md = dnnl::memory::desc(out_dims, memory::data_type::f32, memory::format_tag::abcd);
+        trick_md = dnnl::memory::desc(trick_out_dims, memory::data_type::f32, memory::format_tag::abcde);
+        trick_target_md = dnnl::memory::desc(trick_out_dims, memory::data_type::f32, memory::format_tag::acbde);
       } else {
         mshadow::Stream<cpu> *s = ctx.get_stream<cpu>();
         mxnet_op::Kernel<QuantizationRangeForS8S8MultiplicationStruct, cpu>::Launch(
               s, 1, &min_output_, &max_output_, &min_att, &max_att, &min_qkv,
               &max_qkv);
         out_md = dnnl::memory::desc(out_dims, memory::data_type::s32, memory::format_tag::abcd);
+        trick_md = dnnl::memory::desc(trick_out_dims, memory::data_type::s32, memory::format_tag::abcde);
+        trick_target_md = dnnl::memory::desc(trick_out_dims, memory::data_type::s32, memory::format_tag::acbde);
       }
     } else {
       out_md = dnnl::memory::desc(out_dims, memory::data_type::f32, memory::format_tag::abcd);
+      trick_md = dnnl::memory::desc(trick_out_dims, memory::data_type::f32, memory::format_tag::abcde);
+      trick_target_md = dnnl::memory::desc(trick_out_dims, memory::data_type::f32, memory::format_tag::acbde);
     }
 
     //LOG(INFO) << "X";
@@ -646,13 +661,30 @@ void MKLDNNSelfAttValAttOp::Initialize(const OpContext &ctx,
 
     //LOG(INFO) << "X";
     MSHADOW_TYPE_SWITCH(outputs[0].dtype(), DType, {
-      cached_out_mem_ = std::make_shared<memory>(out_md, engine, outputs[0].data().dptr<DType>());
+      cached_out_mem_ = std::make_shared<memory>(out_md, engine);//, outputs[0].data().dptr<DType>());
+      DType *orig_buf = reinterpret_cast<DType *>(cached_out_mem_->get_data_handle());
+      original = std::make_shared<dnnl::memory>(trick_md, engine, orig_buf);
+      tricked  = std::make_shared<dnnl::memory>(trick_target_md, engine, outputs[0].data().dptr<DType>());
     });
 
+      // float *x = reinterpret_cast<float *>(original->get_data_handle());
+      
+      // float *y = reinterpret_cast<float *>(tricked->get_data_handle());
+    
     //LOG(INFO) << "X";
     args_[DNNL_ARG_SRC]     = *cached_att_mem_;
     args_[DNNL_ARG_WEIGHTS] = *cached_value_mem_;
     args_[DNNL_ARG_DST]     = *cached_out_mem_;
+
+
+
+    auto reorder_pd = dnnl::reorder::primitive_desc(engine, trick_md, engine, trick_target_md);
+    // Create the primitive.
+    reorder_ = std::make_shared<dnnl::reorder>(reorder_pd);
+    // Primitive arguments.
+    reorder_args[DNNL_ARG_SRC] = *original;
+    reorder_args[DNNL_ARG_DST] = *tricked;
+
     initialized_ = true;
 }
 
@@ -678,13 +710,20 @@ void MKLDNNSelfAttValAttOp::Forward(const OpContext &ctx,
     cached_value_mem_->set_data_handle(value_mem_ptr);
   });
 
+      // float *x = reinterpret_cast<float *>(original->get_data_handle());
+      
+      // float *y = reinterpret_cast<float *>(tricked->get_data_handle());
     //LOG(INFO) << "X";
   MSHADOW_TYPE_SWITCH(outputs[0].dtype(), DType, {
-    cached_out_mem_->set_data_handle(outputs[0].data().dptr<DType>());
+    //cached_out_mem_ = std::make_shared<memory>(out_md, engine, outputs[0].data().dptr<DType>());
+    tricked->set_data_handle(outputs[0].data().dptr<DType>());
   });
 
+
     //LOG(INFO) << "X";
+  
   MKLDNNStream::Get()->RegisterPrimArgs(*fwd_, args_);
+  MKLDNNStream::Get()->RegisterPrimArgs(*reorder_, reorder_args);
   MKLDNNStream::Get()->Submit();
 
   if (param_.quantized && !param_.enable_float_output) {
