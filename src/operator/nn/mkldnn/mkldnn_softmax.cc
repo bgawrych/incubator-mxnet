@@ -123,6 +123,28 @@ static MKLDNNSoftmaxFwd &GetSoftmaxFwd(const SoftmaxParam &param,
   return it->second;
 }
 
+void MKLDNNMaskedSoftmaxForward(const nnvm::NodeAttrs& attrs, const OpContext &ctx,
+                                const std::vector<NDArray> &inputs, const std::vector<OpReqType> &req,
+                                const std::vector<NDArray> &outputs) {
+  if (req[0] == kNullOp) return;
+  // same as the FCompute path, softmax only supports kWriteTo and kWriteInplace for now.
+  CHECK_NE(req[0], kAddTo);
+  const NDArray& out_data = outputs[0];
+  const NDArray& in_data = inputs[0];
+  const MaskedSoftmaxParam& param = nnvm::get<MaskedSoftmaxParam>(attrs.parsed);
+  int axis = CheckAxis(param.axis, in_data.shape().ndim());
+  SoftmaxParam p;
+  p.axis = param.axis;
+  
+  auto fwd = GetSoftmaxFwd(p, axis, ctx.is_train, in_data, out_data);
+
+  auto in_mem = in_data.GetMKLDNNData();
+  auto out_mem = out_data.GetMKLDNNData(fwd.pd.dst_desc());
+  MKLDNNStream *stream = MKLDNNStream::Get();
+  stream->RegisterPrimArgs(fwd.GetFwd(), {{MKLDNN_ARG_SRC, *in_mem}, {MKLDNN_ARG_DST, *out_mem}});
+  stream->Submit();
+}
+
 void MKLDNNSoftmaxForward(const nnvm::NodeAttrs& attrs,
                           const OpContext &ctx,
                           const NDArray &in_data,

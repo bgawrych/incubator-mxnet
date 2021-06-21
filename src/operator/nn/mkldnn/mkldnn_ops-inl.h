@@ -90,6 +90,10 @@ void MKLDNNLeakyReluBackward(const nnvm::NodeAttrs &attrs, const OpContext &ctx,
                              const std::vector<NDArray> &outputs);
 
 /* For softmax */
+void MKLDNNMaskedSoftmaxForward(const nnvm::NodeAttrs& attrs, const OpContext &ctx,
+                                const std::vector<NDArray> &inputs, const std::vector<OpReqType> &req,
+                                const std::vector<NDArray> &outputs);
+
 void MKLDNNSoftmaxForward(const nnvm::NodeAttrs& attrs, const OpContext &ctx,
                           const NDArray &in_data, const OpReqType &req,
                           const NDArray &out_data);
